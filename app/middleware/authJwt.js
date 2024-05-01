@@ -4,23 +4,26 @@ const db = require("../models");
 const User = db.user;
 
 verifyToken = (req, res, next) => {
-  let token = req.headers["x-access-token"];
+ // let token = req.headers["x-access-token"];
+  const  token = req.headers['authorization']; 
+  
+  //const token = req.headers['authorization'].split(' ')[1];
 
   if (!token) {
     return res.status(403).send({
-      message: "No token provided!"
+      message: "Unauthorized: No token provided"
     });
   }
 
-  jwt.verify(token,
+  jwt.verify(token.split(' ')[1],
             config.secret,
             (err, decoded) => {
               if (err) {
                 return res.status(401).send({
-                  message: "Unauthorized!",
+                  message: 'Unauthorized: Invalid token',
                 });
               }
-              req.userId = decoded.id;
+              req.user = decoded;
               next();
             });
 };
