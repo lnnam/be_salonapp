@@ -19,4 +19,18 @@ exports._booking_list = async(req, res) => {
   
 }
 
+exports._booking_staff = async(req, res) => {
+  try {
+      const objstore = await db.sequelize.query("select * from tblstaff where dateinactivated is null", {
+        type: db.sequelize.QueryTypes.SELECT,
+      });
+      res.status(200).send(objstore);
+      console.log(objstore);
+  }
+  catch(err) {
+    res.status(500).send({ error : err.message });
+  }
+  
+}
+ 
 
