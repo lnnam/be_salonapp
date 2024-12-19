@@ -34,5 +34,19 @@ exports._booking_staff = async(req, res) => {
   }
   
 }
+
+exports._booking_service = async(req, res) => {
+  try {
+      const objstore = await db.sequelize.query("select a.* , b.name from tblservice a left join tblservice_category b on a.categorykey = b.pkey where a.dateinactivated is null", {
+        type: db.sequelize.QueryTypes.SELECT,
+      });
+      res.status(200).send(objstore);
+      console.log(objstore);
+  }
+  catch(err) {
+    res.status(500).send({ error : err.message });
+  }
+  
+}
  
 
