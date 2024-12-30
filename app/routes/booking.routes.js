@@ -14,3 +14,5 @@ module.exports = function(app) {
   app.get("/api/booking/staff", verifyToken, controller._booking_staff);
   app.get("/api/booking/service", verifyToken, controller._booking_service);
 };
+
+
