@@ -15,7 +15,7 @@ module.exports = function(app) {
   app.get("/api/booking/service", verifyToken, controller._booking_service);
 
   app.get("/api/booking/customer", verifyToken, controller._booking_customer);
-  app.get("/api/booking/add", verifyToken, controller._booking_add);
+  app.post("/api/booking/add", controller._booking_add);
 };
 
 

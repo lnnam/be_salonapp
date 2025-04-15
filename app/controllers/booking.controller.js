@@ -27,7 +27,7 @@ exports._booking_staff = async(req, res) => {
         type: db.sequelize.QueryTypes.SELECT,
       });
       res.status(200).send(objstore);
-      console.log(objstore);
+     // console.log(objstore);
   }
   catch(err) {
     res.status(500).send({ error : err.message });
@@ -41,7 +41,7 @@ exports._booking_customer = async(req, res) => {
         type: db.sequelize.QueryTypes.SELECT,
       });
       res.status(200).send(objstore);
-      console.log(objstore);
+    ///  console.log(objstore);
   }
   catch(err) {
     res.status(500).send({ error : err.message });
@@ -55,7 +55,7 @@ exports._booking_service = async(req, res) => {
         type: db.sequelize.QueryTypes.SELECT,
       });
       res.status(200).send(objstore);
-      console.log(objstore);
+      //console.log(objstore);
   }
   catch(err) {
     res.status(500).send({ error : err.message });
@@ -79,37 +79,38 @@ exports._booking_listcustomer = async(req, res) => {
  
 
 exports._booking_add = async (req, res) => {
+  console.log(req);
   try {
     const {
       customerkey, servicekey, staffkey, date, datetime,
-      dateactivated, note, customername, staffname, servicename,
-      userkey, log
+       note, customername, staffname, servicename,
+      userkey
     } = req.body;
 
     // Validate required fields
-    if (!customerkey || !servicekey || !staffkey || !date || !datetime || !dateactivated) {
+    if (!customerkey || !servicekey || !staffkey || !date || !datetime ) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
     const insertQuery = `
       INSERT INTO tblbooking 
       (customerkey, servicekey, staffkey, date, datetime, dateactivated, note, 
-       customername, staffname, servicename, userkey, log, numperson) 
+       customername, staffname, servicename, userkey) 
       VALUES 
-      (:customerkey, :servicekey, :price, :staffkey, :CURDATE(), :datetime, :NOW(), :note, 
-       :customername, :staffname, :servicename, :userkey, :bill_time, :log)
+      (:customerkey, :servicekey, :staffkey, CURDATE(), :datetime, NOW(), :note, 
+       :customername, :staffname, :servicename, :userkey)
     `;
 
     const objstore = await db.sequelize.query(insertQuery, {
       replacements: {
         customerkey, servicekey, staffkey, date, datetime,
-        dateactivated, note, customername, staffname, servicename,
-        userkey, log
+         note, customername, staffname, servicename,
+        userkey
       },
       type: db.sequelize.QueryTypes.INSERT,
     });
 
-    res.status(201).json({ message: "Booking added successfully", bookingId: objstore[0] });
+    res.status(201).json({ message: "Booking added successfully", bookingkey: objstore[0] });
 
   } catch (err) {
     console.error("Database Insert Error:", err);
