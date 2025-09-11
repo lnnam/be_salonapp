@@ -13,6 +13,8 @@ module.exports = function(app) {
   app.get("/api/booking/list", verifyToken, controller._booking_list);
   app.get("/api/booking/staff", verifyToken, controller._booking_staff);
   app.get("/api/booking/service", verifyToken, controller._booking_service);
+  app.get("/api/booking/customer", verifyToken, controller._booking_listcustomer);
+
 };
 
 
