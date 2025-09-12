@@ -27,7 +27,21 @@ exports._booking_staff = async(req, res) => {
         type: db.sequelize.QueryTypes.SELECT,
       });
       res.status(200).send(objstore);
-      console.log(objstore);
+     // console.log(objstore);
+  }
+  catch(err) {
+    res.status(500).send({ error : err.message });
+  }
+  
+}
+
+exports._booking_customer = async(req, res) => {
+  try {
+      const objstore = await db.sequelize.query("select * from tblcustomer where dateinactivated is null", {
+        type: db.sequelize.QueryTypes.SELECT,
+      });
+      res.status(200).send(objstore);
+    ///  console.log(objstore);
   }
   catch(err) {
     res.status(500).send({ error : err.message });
@@ -41,7 +55,7 @@ exports._booking_service = async(req, res) => {
         type: db.sequelize.QueryTypes.SELECT,
       });
       res.status(200).send(objstore);
-      console.log(objstore);
+      //console.log(objstore);
   }
   catch(err) {
     res.status(500).send({ error : err.message });
@@ -62,5 +76,47 @@ exports._booking_listcustomer = async(req, res) => {
   }
   
 }
+ 
+
+exports._booking_add = async (req, res) => {
+  console.log(req);
+  try {
+    const {
+      customerkey, servicekey, staffkey, date, datetime,
+       note, customername, staffname, servicename,
+      userkey
+    } = req.body;
+
+    // Validate required fields
+    if (!customerkey || !servicekey || !staffkey || !date || !datetime ) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const insertQuery = `
+      INSERT INTO tblbooking 
+      (customerkey, servicekey, staffkey, date, datetime, dateactivated, note, 
+       customername, staffname, servicename, userkey) 
+      VALUES 
+      (:customerkey, :servicekey, :staffkey, CURDATE(), :datetime, NOW(), :note, 
+       :customername, :staffname, :servicename, :userkey)
+    `;
+
+    const objstore = await db.sequelize.query(insertQuery, {
+      replacements: {
+        customerkey, servicekey, staffkey, date, datetime,
+         note, customername, staffname, servicename,
+        userkey
+      },
+      type: db.sequelize.QueryTypes.INSERT,
+    });
+
+    res.status(201).json({ message: "Booking added successfully", bookingkey: objstore[0] });
+
+  } catch (err) {
+    console.error("Database Insert Error:", err);
+    res.status(500).json({ error: "Internal Server Error", details: err.message });
+  }
+};
+
  
 
