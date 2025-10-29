@@ -77,6 +77,32 @@ exports._booking_listcustomer = async(req, res) => {
   
 }
  
+exports._booking_del = async (req, res) => {
+  try {
+    const { bookingkey } = req.body;
+
+    if (!bookingkey) {
+      return res.status(400).json({ error: "Missing bookingkey" });
+    }
+
+    // Soft delete: set dateinactivated to NOW()
+    const updateQuery = `
+      UPDATE tblbooking
+      SET dateinactivated = NOW()
+      WHERE pkey = :bookingkey
+    `;
+
+    const result = await db.sequelize.query(updateQuery, {
+      replacements: { bookingkey },
+      type: db.sequelize.QueryTypes.UPDATE,
+    });
+
+    res.status(200).json({ message: "Booking deleted successfully" });
+  } catch (err) {
+    console.error("Database Delete Error:", err);
+    res.status(500).json({ error: "Internal Server Error", details: err.message });
+  }
+};
 
 exports._booking_add = async (req, res) => {
   console.log(req);
@@ -92,6 +118,18 @@ exports._booking_add = async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
+    // Format "10:45, 20/09/2025" to "2025-09-20 10:45:00"
+function formatToMySQLDatetime(dtStr) {
+  // dtStr example: "10:45, 20/09/2025"
+  const [time, date] = dtStr.split(',').map(s => s.trim());
+  const [hour, minute] = time.split(':');
+  const [day, month, year] = date.split('/');
+
+  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')} ${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:00`;
+}
+
+    const formattedDatetime = formatToMySQLDatetime(datetime);
+
     const insertQuery = `
       INSERT INTO tblbooking 
       (customerkey, servicekey, staffkey, date, datetime, dateactivated, note, 
@@ -103,8 +141,8 @@ exports._booking_add = async (req, res) => {
 
     const objstore = await db.sequelize.query(insertQuery, {
       replacements: {
-        customerkey, servicekey, staffkey, date, datetime,
-         note, customername, staffname, servicename,
+        customerkey, servicekey, staffkey, date, datetime: formattedDatetime,
+        note, customername, staffname, servicename,
         userkey
       },
       type: db.sequelize.QueryTypes.INSERT,
