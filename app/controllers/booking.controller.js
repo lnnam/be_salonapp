@@ -79,21 +79,21 @@ exports._booking_listcustomer = async(req, res) => {
  
 exports._booking_del = async (req, res) => {
   try {
-    const { bookingkey } = req.body;
+    // read pkey from URL param for DELETE
+    const pkey = req.params.pkey || (req.body && req.body.pkey);
 
-    if (!bookingkey) {
-      return res.status(400).json({ error: "Missing bookingkey" });
+    if (!pkey) {
+      return res.status(400).json({ error: "Missing pkey" });
     }
 
-    // Soft delete: set dateinactivated to NOW()
     const updateQuery = `
       UPDATE tblbooking
       SET dateinactivated = NOW()
-      WHERE pkey = :bookingkey
+      WHERE pkey = :pkey
     `;
 
-    const result = await db.sequelize.query(updateQuery, {
-      replacements: { bookingkey },
+    await db.sequelize.query(updateQuery, {
+      replacements: { pkey },
       type: db.sequelize.QueryTypes.UPDATE,
     });
 
@@ -156,5 +156,5 @@ function formatToMySQLDatetime(dtStr) {
   }
 };
 
- 
+
 
