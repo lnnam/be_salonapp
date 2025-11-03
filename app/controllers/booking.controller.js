@@ -104,54 +104,86 @@ exports._booking_del = async (req, res) => {
   }
 };
 
-exports._booking_add = async (req, res) => {
-  console.log(req);
+exports._booking_save = async (req, res) => {
+  console.log("Received booking save request:", req.body);
+  //return
   try {
     const {
-      customerkey, servicekey, staffkey, date, datetime,
-       note, customername, staffname, servicename,
+      bookingkey, customerkey, servicekey, staffkey, date, datetime,
+      note, customername, staffname, servicename,
       userkey
     } = req.body;
 
     // Validate required fields
-    if (!customerkey || !servicekey || !staffkey || !date || !datetime ) {
+    if (!customerkey || !servicekey || !staffkey || !datetime) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
     // Format "10:45, 20/09/2025" to "2025-09-20 10:45:00"
-function formatToMySQLDatetime(dtStr) {
-  // dtStr example: "10:45, 20/09/2025"
-  const [time, date] = dtStr.split(',').map(s => s.trim());
-  const [hour, minute] = time.split(':');
-  const [day, month, year] = date.split('/');
-
-  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')} ${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:00`;
-}
+    function formatToMySQLDatetime(dtStr) {
+      const [time, datePart] = dtStr.split(',').map(s => s.trim());
+      const [hour, minute] = time.split(':');
+      const [day, month, year] = datePart.split('/');
+      return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')} ${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:00`;
+    }
 
     const formattedDatetime = formatToMySQLDatetime(datetime);
 
-    const insertQuery = `
-      INSERT INTO tblbooking 
-      (customerkey, servicekey, staffkey, date, datetime, dateactivated, note, 
-       customername, staffname, servicename, userkey) 
-      VALUES 
-      (:customerkey, :servicekey, :staffkey, CURDATE(), :datetime, NOW(), :note, 
-       :customername, :staffname, :servicename, :userkey)
-    `;
+    if (bookingkey && Number(bookingkey) > 0) {
+      // Update existing booking
+      const updateQuery = `
+        UPDATE tblbooking
+        SET customerkey = :customerkey,
+            servicekey = :servicekey,
+            staffkey = :staffkey,
+            date = DATE(:datetime),
+            datetime = :datetime,
+            note = :note,
+            customername = :customername,
+            staffname = :staffname,
+            servicename = :servicename,
+            userkey = :userkey,
+            dateactivated = COALESCE(dateactivated, NOW())
+        WHERE pkey = :bookingkey
+      `;
 
-    const objstore = await db.sequelize.query(insertQuery, {
-      replacements: {
-        customerkey, servicekey, staffkey, date, datetime: formattedDatetime,
-        note, customername, staffname, servicename,
-        userkey
-      },
-      type: db.sequelize.QueryTypes.INSERT,
-    });
+      await db.sequelize.query(updateQuery, {
+        replacements: {
+          bookingkey: Number(bookingkey),
+          customerkey, servicekey, staffkey,
+          datetime: formattedDatetime,
+          note, customername, staffname, servicename, userkey
+        },
+        type: db.sequelize.QueryTypes.UPDATE,
+      });
 
-    res.status(201).json({ message: "Booking added successfully", bookingkey: objstore[0] });
+      return res.status(201).json({ message: "Booking updated successfully", bookingkey: Number(bookingkey) });
+    } else {
+      // Insert new booking
+      const insertQuery = `
+        INSERT INTO tblbooking 
+        (customerkey, servicekey, staffkey, date, datetime, dateactivated, note, 
+         customername, staffname, servicename, userkey) 
+        VALUES 
+        (:customerkey, :servicekey, :staffkey, CURDATE(), :datetime, NOW(), :note, 
+         :customername, :staffname, :servicename, :userkey)
+      `;
+
+      const objstore = await db.sequelize.query(insertQuery, {
+        replacements: {
+          customerkey, servicekey, staffkey,
+          datetime: formattedDatetime,
+          note, customername, staffname, servicename,
+          userkey
+        },
+        type: db.sequelize.QueryTypes.INSERT,
+      });
+
+      return res.status(201).json({ message: "Booking added successfully", bookingkey: objstore[0] });
+    }
 
   } catch (err) {
-    console.error("Database Insert Error:", err);
+    console.error("Database Save Error:", err);
     res.status(500).json({ error: "Internal Server Error", details: err.message });
   }
 };
