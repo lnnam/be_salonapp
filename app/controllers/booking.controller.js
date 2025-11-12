@@ -117,14 +117,67 @@ exports._booking_save = async (req, res) => {
       datetime, // e.g. "10:45, 20/09/2025"
       note,
       customername,
+        customeremail,
+        customerphone,
       staffname,
       servicename,
       userkey
     } = req.body;
 
-    // Validate required fields
-    if (!customerkey || !servicekey || !staffkey || !datetime) {
+    // Validate required fields (customerkey may be resolved from phone/email)
+    if (!servicekey || !staffkey || !datetime) {
       return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    // Resolve or create customer:
+    // - If `customerkey` provided and >0 use it
+    // - Else try to find by `customerphone`, then by `customeremail`
+    // - If not found, insert a new customer and use its pkey
+    let resolvedCustomerKey = customerkey && Number(customerkey) > 0 ? Number(customerkey) : null;
+
+    if (!resolvedCustomerKey) {
+      // normalize inputs
+      const phone = customerphone ? String(customerphone).trim() : null;
+      const email = customeremail ? String(customeremail).trim().toLowerCase() : null;
+
+      if (phone) {
+        const foundByPhone = await db.sequelize.query(
+          "SELECT pkey FROM tblcustomer WHERE phone = :phone AND dateinactivated IS NULL LIMIT 1",
+          { replacements: { phone }, type: db.sequelize.QueryTypes.SELECT }
+        );
+        if (Array.isArray(foundByPhone) && foundByPhone.length > 0) {
+          resolvedCustomerKey = foundByPhone[0].pkey;
+        }
+      }
+
+      if (!resolvedCustomerKey && email) {
+        const foundByEmail = await db.sequelize.query(
+          "SELECT pkey FROM tblcustomer WHERE LOWER(email) = :email AND dateinactivated IS NULL LIMIT 1",
+          { replacements: { email }, type: db.sequelize.QueryTypes.SELECT }
+        );
+        if (Array.isArray(foundByEmail) && foundByEmail.length > 0) {
+          resolvedCustomerKey = foundByEmail[0].pkey;
+        }
+      }
+
+      if (!resolvedCustomerKey) {
+        // insert new customer
+        const insertCustomerQuery = `
+          INSERT INTO tblcustomer (fullname, email, phone, type, dateactivated, numbooking)
+          VALUES (:fullname, :email, :phone, :type, NOW(), 0)
+        `;
+        const ins = await db.sequelize.query(insertCustomerQuery, {
+          replacements: {
+            fullname: customername || null,
+            email: email || null,
+            phone: phone || null,
+            type: 'customer'
+          },
+          type: db.sequelize.QueryTypes.INSERT,
+        });
+        // Sequelize returns array where first element is insertId
+        resolvedCustomerKey = ins[0];
+      }
     }
 
     // ⏰ Convert "10:45, 20/09/2025" → MySQL DATETIME "2025-09-20 10:45:00"
@@ -154,6 +207,8 @@ exports._booking_save = async (req, res) => {
         SET customerkey = :customerkey,
             servicekey = :servicekey,
             staffkey = :staffkey,
+            customeremail = :customeremail,
+            customerphone = :customerphone,
             date = DATE(:datetime),
              datetime = :datetime,
             bookingstart = :bookingstart,
@@ -170,10 +225,12 @@ exports._booking_save = async (req, res) => {
       await db.sequelize.query(updateQuery, {
         replacements: {
           bookingkey: Number(bookingkey),
-          customerkey,
+          customerkey: resolvedCustomerKey,
           servicekey,
           staffkey,
-          datetime: formattedDatetime,
+          customeremail,
+          customerphone,
+          datetime: bookingStart,
           bookingstart: bookingStart,
           bookingend: bookingEndStr,
           note,
@@ -193,17 +250,21 @@ exports._booking_save = async (req, res) => {
       const insertQuery = `
         INSERT INTO tblbooking 
         (customerkey, servicekey, staffkey,date, datetime, bookingstart, bookingend, 
+         customeremail, customerphone,
          dateactivated, note, customername, staffname, servicename, userkey)
         VALUES 
         (:customerkey, :servicekey, :staffkey, CURDATE(), NOW(), :bookingstart, :bookingend, 
+         :customeremail, :customerphone,
          NOW(), :note, :customername, :staffname, :servicename, :userkey)
       `;
 
       const objstore = await db.sequelize.query(insertQuery, {
         replacements: {
-          customerkey,
+          customerkey: resolvedCustomerKey,
           servicekey,
           staffkey,
+          customeremail,
+          customerphone,
           bookingstart: bookingStart,
           bookingend: bookingEndStr,
           note,
@@ -239,14 +300,64 @@ exports._bookingweb_save = async (req, res) => {
       datetime, // e.g. "10:45, 20/09/2025"
       note,
       customername,
+      customeremail,
+      customerphone,
       staffname,
       servicename,
       userkey
     } = req.body;
 
-    // Validate required fields
-    if (!customerkey || !servicekey || !staffkey || !datetime) {
+    // Validate required fields (customerkey may be resolved from phone/email)
+    if (!servicekey || !staffkey || !datetime) {
       return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    // Resolve or create customer for bookingweb_save:
+    // - If `customerkey` provided and >0 use it
+    // - Else try to find by `customerphone`, then by `customeremail`
+    // - If not found, insert a new customer and use its pkey
+    let resolvedCustomerKey = customerkey && Number(customerkey) > 0 ? Number(customerkey) : null;
+
+    if (!resolvedCustomerKey) {
+      const phone = customerphone ? String(customerphone).trim() : null;
+      const email = customeremail ? String(customeremail).trim().toLowerCase() : null;
+
+      if (phone) {
+        const foundByPhone = await db.sequelize.query(
+          "SELECT pkey FROM tblcustomer WHERE phone = :phone AND dateinactivated IS NULL LIMIT 1",
+          { replacements: { phone }, type: db.sequelize.QueryTypes.SELECT }
+        );
+        if (Array.isArray(foundByPhone) && foundByPhone.length > 0) {
+          resolvedCustomerKey = foundByPhone[0].pkey;
+        }
+      }
+
+      if (!resolvedCustomerKey && email) {
+        const foundByEmail = await db.sequelize.query(
+          "SELECT pkey FROM tblcustomer WHERE LOWER(email) = :email AND dateinactivated IS NULL LIMIT 1",
+          { replacements: { email }, type: db.sequelize.QueryTypes.SELECT }
+        );
+        if (Array.isArray(foundByEmail) && foundByEmail.length > 0) {
+          resolvedCustomerKey = foundByEmail[0].pkey;
+        }
+      }
+
+      if (!resolvedCustomerKey) {
+        const insertCustomerQuery = `
+          INSERT INTO tblcustomer (fullname, email, phone, type, dateactivated, numbooking)
+          VALUES (:fullname, :email, :phone, :type, NOW(), 0)
+        `;
+        const ins = await db.sequelize.query(insertCustomerQuery, {
+          replacements: {
+            fullname: customername || null,
+            email: email || null,
+            phone: phone || null,
+            type: 'online'
+          },
+          type: db.sequelize.QueryTypes.INSERT,
+        });
+        resolvedCustomerKey = ins[0];
+      }
     }
 
     // ⏰ Convert "10:45, 20/09/2025" → MySQL DATETIME "2025-09-20 10:45:00"
@@ -276,6 +387,8 @@ exports._bookingweb_save = async (req, res) => {
         SET customerkey = :customerkey,
             servicekey = :servicekey,
             staffkey = :staffkey,
+            customeremail = :customeremail,
+            customerphone = :customerphone,
             date = DATE(:datetime),
              datetime = :datetime,
             bookingstart = :bookingstart,
@@ -292,10 +405,12 @@ exports._bookingweb_save = async (req, res) => {
       await db.sequelize.query(updateQuery, {
         replacements: {
           bookingkey: Number(bookingkey),
-          customerkey,
+          customerkey: resolvedCustomerKey,
           servicekey,
           staffkey,
-          datetime: formattedDatetime,
+          customeremail,
+          customerphone,
+          datetime: bookingStart,
           bookingstart: bookingStart,
           bookingend: bookingEndStr,
           note,
@@ -315,17 +430,21 @@ exports._bookingweb_save = async (req, res) => {
       const insertQuery = `
         INSERT INTO tblbooking 
         (customerkey, servicekey, staffkey,date, datetime, bookingstart, bookingend, 
+         customeremail, customerphone,
          dateactivated, note, customername, staffname, servicename, userkey)
         VALUES 
         (:customerkey, :servicekey, :staffkey, CURDATE(), NOW(), :bookingstart, :bookingend, 
+         :customeremail, :customerphone,
          NOW(), :note, :customername, :staffname, :servicename, :userkey)
       `;
 
       const objstore = await db.sequelize.query(insertQuery, {
         replacements: {
-          customerkey,
+          customerkey: resolvedCustomerKey,
           servicekey,
           staffkey,
+          customeremail,
+          customerphone,
           bookingstart: bookingStart,
           bookingend: bookingEndStr,
           note,
