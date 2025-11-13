@@ -36,10 +36,12 @@ module.exports = function (app) {
   app.get("/api/booking/staff", controller._booking_staff); // Public
   app.get("/api/booking/service", controller._booking_service); // Public
   app.get("/api/booking/customer", verifyToken, controller._booking_customer);
-  app.post("/api/booking/save",verifyToken, controller._booking_save);
+  app.post("/api/booking/save", verifyToken, controller._booking_save);
   app.post("/api/booking/websave", controller._bookingweb_save);
   app.get("/api/booking/getavailability", controller._getavailability);
   app.delete("/api/booking/del/:pkey", verifyToken, controller._booking_del);
+  app.get("/api/booking/customer/profile", controller._customer_profile);
+  app.get("/api/booking/customer/bookings", controller._customer_bookings);
 
 };
 

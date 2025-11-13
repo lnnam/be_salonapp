@@ -10,73 +10,73 @@ const Op = db.Sequelize.Op;
 var jwt = require("jsonwebtoken");
 var bcrypt = require("bcryptjs");
 
-exports._booking_list = async(req, res) => {
+exports._booking_list = async (req, res) => {
   try {
-      const objstore = await db.sequelize.query("call spListCurrentBooking()");
-      res.status(200).send(objstore);
+    const objstore = await db.sequelize.query("call spListCurrentBooking()");
+    res.status(200).send(objstore);
   }
-  catch(err) {
-    res.status(500).send({ error : err.message });
+  catch (err) {
+    res.status(500).send({ error: err.message });
   }
-  
+
 }
 
-exports._booking_staff = async(req, res) => {
+exports._booking_staff = async (req, res) => {
   try {
-      const objstore = await db.sequelize.query("select pkey, fullname, photobase64 from tblstaff where dateinactivated is null order by pkey", {
-        type: db.sequelize.QueryTypes.SELECT,
-      });
-      res.status(200).send(objstore);
-     // console.log(objstore);
+    const objstore = await db.sequelize.query("select pkey, fullname, photobase64 from tblstaff where dateinactivated is null order by pkey", {
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+    res.status(200).send(objstore);
+    // console.log(objstore);
   }
-  catch(err) {
-    res.status(500).send({ error : err.message });
+  catch (err) {
+    res.status(500).send({ error: err.message });
   }
-  
+
 }
 
-exports._booking_customer = async(req, res) => {
+exports._booking_customer = async (req, res) => {
   try {
-      const objstore = await db.sequelize.query("select * from tblcustomer where dateinactivated is null", {
-        type: db.sequelize.QueryTypes.SELECT,
-      });
-      res.status(200).send(objstore);
+    const objstore = await db.sequelize.query("select * from tblcustomer where dateinactivated is null", {
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+    res.status(200).send(objstore);
     ///  console.log(objstore);
   }
-  catch(err) {
-    res.status(500).send({ error : err.message });
+  catch (err) {
+    res.status(500).send({ error: err.message });
   }
-  
+
 }
 
-exports._booking_service = async(req, res) => {
+exports._booking_service = async (req, res) => {
   try {
-      const objstore = await db.sequelize.query("select a.* , b.name as category from tblservice a left join tblservice_category b on a.categorykey = b.pkey where a.dateinactivated is null", {
-        type: db.sequelize.QueryTypes.SELECT,
-      });
-      res.status(200).send(objstore);
-      //console.log(objstore);
+    const objstore = await db.sequelize.query("select a.* , b.name as category from tblservice a left join tblservice_category b on a.categorykey = b.pkey where a.dateinactivated is null", {
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+    res.status(200).send(objstore);
+    //console.log(objstore);
   }
-  catch(err) {
-    res.status(500).send({ error : err.message });
+  catch (err) {
+    res.status(500).send({ error: err.message });
   }
-  
+
 }
 
-exports._booking_listcustomer = async(req, res) => {
+exports._booking_listcustomer = async (req, res) => {
   try {
-      const objstore = await db.sequelize.query("select pkey, fullname, phone , photo from tblcustomer where dateinactivated is null", {
-        type: db.sequelize.QueryTypes.SELECT,
-      });
-      res.status(200).send(objstore);
-      console.log(objstore);
+    const objstore = await db.sequelize.query("select pkey, fullname, phone , photo from tblcustomer where dateinactivated is null", {
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+    res.status(200).send(objstore);
+    console.log(objstore);
   }
-  catch(err) {
-    res.status(500).send({ error : err.message });
+  catch (err) {
+    res.status(500).send({ error: err.message });
   }
-  
+
 }
- 
+
 exports._booking_del = async (req, res) => {
   try {
     // read pkey from URL param for DELETE
@@ -117,8 +117,8 @@ exports._booking_save = async (req, res) => {
       datetime, // e.g. "10:45, 20/09/2025"
       note,
       customername,
-        customeremail,
-        customerphone,
+      customeremail,
+      customerphone,
       staffname,
       servicename,
       userkey
@@ -297,7 +297,7 @@ exports._bookingweb_save = async (req, res) => {
       servicekey,
       staffkey,
       date,
-      datetime, // e.g. "10:45, 20/09/2025"
+      datetime,
       note,
       customername,
       customeremail,
@@ -307,15 +307,10 @@ exports._bookingweb_save = async (req, res) => {
       userkey
     } = req.body;
 
-    // Validate required fields (customerkey may be resolved from phone/email)
     if (!servicekey || !staffkey || !datetime) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // Resolve or create customer for bookingweb_save:
-    // - If `customerkey` provided and >0 use it
-    // - Else try to find by `customerphone`, then by `customeremail`
-    // - If not found, insert a new customer and use its pkey
     let resolvedCustomerKey = customerkey && Number(customerkey) > 0 ? Number(customerkey) : null;
 
     if (!resolvedCustomerKey) {
@@ -360,7 +355,6 @@ exports._bookingweb_save = async (req, res) => {
       }
     }
 
-    // ⏰ Convert "10:45, 20/09/2025" → MySQL DATETIME "2025-09-20 10:45:00"
     function formatToMySQLDatetime(dtStr) {
       const [time, datePart] = dtStr.split(",").map((s) => s.trim());
       const [hour, minute] = time.split(":");
@@ -372,16 +366,13 @@ exports._bookingweb_save = async (req, res) => {
     }
 
     const bookingStart = formatToMySQLDatetime(datetime);
-
-    // 💡 Calculate booking end = start + 45 minutes
     const bookingEnd = new Date(bookingStart);
     bookingEnd.setMinutes(bookingEnd.getMinutes() + 45);
-
-    // Convert back to MySQL string format
     const bookingEndStr = bookingEnd.toISOString().slice(0, 19).replace("T", " ");
 
+    let newBookingKey = bookingkey;
+
     if (bookingkey && Number(bookingkey) > 0) {
-      // 🔄 UPDATE existing booking
       const updateQuery = `
         UPDATE tblbooking
         SET customerkey = :customerkey,
@@ -390,7 +381,7 @@ exports._bookingweb_save = async (req, res) => {
             customeremail = :customeremail,
             customerphone = :customerphone,
             date = DATE(:datetime),
-             datetime = :datetime,
+            datetime = :datetime,
             bookingstart = :bookingstart,
             bookingend = :bookingend,
             note = :note,
@@ -422,14 +413,11 @@ exports._bookingweb_save = async (req, res) => {
         type: db.sequelize.QueryTypes.UPDATE,
       });
 
-      return res
-        .status(201)
-        .json({ message: "Booking updated successfully", bookingkey: Number(bookingkey) });
+      newBookingKey = Number(bookingkey);
     } else {
-      // 🆕 INSERT new booking
       const insertQuery = `
         INSERT INTO tblbooking 
-        (customerkey, servicekey, staffkey,date, datetime, bookingstart, bookingend, 
+        (customerkey, servicekey, staffkey, date, datetime, bookingstart, bookingend, 
          customeremail, customerphone,
          dateactivated, note, customername, staffname, servicename, userkey)
         VALUES 
@@ -456,14 +444,92 @@ exports._bookingweb_save = async (req, res) => {
         type: db.sequelize.QueryTypes.INSERT,
       });
 
-      return res.status(201).json({
-        message: "Booking added successfully",
-        bookingkey: objstore[0],
-      });
+      newBookingKey = objstore[0];
     }
+
+    // 🎟️ Generate customer token
+    const customerToken = jwt.sign(
+      {
+        customerkey: resolvedCustomerKey,
+        email: customeremail,
+        phone: customerphone,
+        name: customername,
+        type: 'web_customer'
+      },
+      config.secret,
+      { expiresIn: 86400 * 30 } // 30 days
+    );
+
+    return res.status(201).json({
+      message: "Booking added successfully",
+      bookingkey: newBookingKey,
+      customerkey: resolvedCustomerKey,
+      token: customerToken
+    });
+
   } catch (err) {
     console.error("Database Save Error:", err);
     res.status(500).json({ error: "Internal Server Error", details: err.message });
+  }
+};
+
+// Get customer profile by token
+exports._customer_profile = async (req, res) => {
+  try {
+    const token = req.headers['authorization'];
+
+    if (!token) {
+      return res.status(403).json({ message: "No token provided" });
+    }
+
+    const decoded = jwt.verify(token.split(' ')[1], config.secret);
+
+    const customer = await db.sequelize.query(
+      "SELECT pkey, fullname, email, phone, type, dateactivated FROM tblcustomer WHERE pkey = :customerkey AND dateinactivated IS NULL",
+      {
+        replacements: { customerkey: decoded.customerkey },
+        type: db.sequelize.QueryTypes.SELECT
+      }
+    );
+
+    if (!customer || customer.length === 0) {
+      return res.status(404).json({ message: "Customer not found" });
+    }
+
+    res.status(200).json(customer[0]);
+  } catch (err) {
+    console.error("Profile fetch error:", err);
+    res.status(401).json({ error: "Invalid or expired token" });
+  }
+};
+
+// Get customer bookings by token
+exports._customer_bookings = async (req, res) => {
+  try {
+    const token = req.headers['authorization'];
+
+    if (!token) {
+      return res.status(403).json({ message: "No token provided" });
+    }
+
+    const decoded = jwt.verify(token.split(' ')[1], config.secret);
+
+    const bookings = await db.sequelize.query(
+      `SELECT pkey, servicekey, staffkey, datetime, bookingstart, bookingend, 
+              note, customername, staffname, servicename, dateactivated
+       FROM tblbooking 
+       WHERE customerkey = :customerkey AND dateinactivated IS NULL
+       ORDER BY datetime DESC`,
+      {
+        replacements: { customerkey: decoded.customerkey },
+        type: db.sequelize.QueryTypes.SELECT
+      }
+    );
+
+    res.status(200).json(bookings);
+  } catch (err) {
+    console.error("Bookings fetch error:", err);
+    res.status(401).json({ error: "Invalid or expired token" });
   }
 };
 
