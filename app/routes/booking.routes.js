@@ -38,6 +38,7 @@ module.exports = function (app) {
   app.get("/api/booking/customer", verifyToken, controller._booking_customer);
   app.post("/api/booking/save", verifyToken, controller._booking_save);
   app.post("/api/booking/websave", controller._bookingweb_save);
+  app.post("/api/booking/customer/register-member", verifyToken, controller._register_member);
   app.get("/api/booking/getavailability", controller._getavailability);
   app.delete("/api/booking/del/:pkey", verifyToken, controller._booking_del);
   app.get("/api/booking/customer/profile", controller._customer_profile);

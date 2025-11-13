@@ -597,4 +597,93 @@ exports._getavailability = async (req, res) => {
   }
 };
 
+// Register or update a customer (member) via API
+// POST /api/booking/customer/register-member
+// Body: { customerkey, fullname, email, phone, password, dob }
+exports._register_member = async (req, res) => {
+  try {
+    const { customerkey, fullname, email, phone, password, dob } = req.body;
+
+    if (!fullname || !email || !phone || !password) {
+      return res.status(400).json({ error: "Missing required fields: fullname, email, phone, password" });
+    }
+
+    // Hash password
+    const hashedPassword = bcrypt.hashSync(password, 8);
+
+    if (customerkey && Number(customerkey) > 0) {
+      // Update existing customer
+      const updateQuery = `
+        UPDATE tblcustomer
+        SET fullname = :fullname,
+            email = :email,
+            phone = :phone,
+            password = :password,
+            birthday = :dob,
+            dateactivated = COALESCE(dateactivated, NOW())
+        WHERE pkey = :customerkey
+      `;
+
+      await db.sequelize.query(updateQuery, {
+        replacements: {
+          fullname,
+          email,
+          phone,
+          password: hashedPassword,
+          dob: dob || null,
+          customerkey: Number(customerkey),
+        },
+        type: db.sequelize.QueryTypes.UPDATE,
+      });
+
+      return res.status(200).json({ message: "Customer updated successfully", customerkey: Number(customerkey) });
+    }
+
+    // Insert new customer
+    const insertQuery = `
+      INSERT INTO tblcustomer (fullname, email, phone, password, birthday, type, dateactivated, numbooking)
+      VALUES (:fullname, :email, :phone, :password, :dob, :type, NOW(), 0)
+    `;
+
+    const ins = await db.sequelize.query(insertQuery, {
+      replacements: {
+        fullname,
+        email,
+        phone,
+        password: hashedPassword,
+        dob: dob || null,
+        type: 'member',
+      },
+      type: db.sequelize.QueryTypes.INSERT,
+    });
+
+    // Normalize insert result to get inserted id
+    let newId = null;
+    if (ins && Array.isArray(ins)) {
+      const first = ins[0];
+      if (typeof first === 'number') newId = first;
+      else if (first && typeof first.insertId !== 'undefined') newId = first.insertId;
+      else if (first && typeof first.pkey !== 'undefined') newId = first.pkey;
+    }
+
+    // Fallback: select by email/phone
+    if (!newId) {
+      const rows = await db.sequelize.query(
+        "SELECT pkey FROM tblcustomer WHERE (LOWER(email) = :email OR phone = :phone) AND dateinactivated IS NULL ORDER BY pkey DESC LIMIT 1",
+        { replacements: { email: String(email).toLowerCase(), phone }, type: db.sequelize.QueryTypes.SELECT }
+      );
+      if (Array.isArray(rows) && rows.length > 0) newId = rows[0].pkey;
+    }
+
+    if (!newId) {
+      return res.status(500).json({ error: "Failed to create customer" });
+    }
+
+    return res.status(201).json({ message: "Customer registered", customerkey: Number(newId) });
+  } catch (err) {
+    console.error("register-member error:", err);
+    return res.status(500).json({ error: "Internal Server Error", details: err.message });
+  }
+};
+
 
