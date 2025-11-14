@@ -9,6 +9,24 @@ const Op = db.Sequelize.Op;
 
 var jwt = require("jsonwebtoken");
 var bcrypt = require("bcryptjs");
+const notifications = require('../helpers/notifications');
+
+// Add helper function to format datetime for display
+function formatDatetimeForDisplay(mysqlDatetime) {
+  try {
+    const dt = new Date(mysqlDatetime);
+    const options = {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    };
+    return dt.toLocaleDateString('en-US', options);
+  } catch (e) {
+    return mysqlDatetime;
+  }
+}
 
 exports._booking_list = async (req, res) => {
   try {
@@ -77,217 +95,7 @@ exports._booking_listcustomer = async (req, res) => {
 
 }
 
-exports._booking_del = async (req, res) => {
-  try {
-    // read pkey from URL param for DELETE
-    const pkey = req.params.pkey || (req.body && req.body.pkey);
-
-    if (!pkey) {
-      return res.status(400).json({ error: "Missing pkey" });
-    }
-
-    const updateQuery = `
-      UPDATE tblbooking
-      SET dateinactivated = NOW()
-      WHERE pkey = :pkey
-    `;
-
-    await db.sequelize.query(updateQuery, {
-      replacements: { pkey },
-      type: db.sequelize.QueryTypes.UPDATE,
-    });
-
-    res.status(200).json({ message: "Booking deleted successfully" });
-  } catch (err) {
-    console.error("Database Delete Error:", err);
-    res.status(500).json({ error: "Internal Server Error", details: err.message });
-  }
-};
-
 exports._booking_save = async (req, res) => {
-  console.log("Received booking save request:", req.body);
-
-  try {
-    const {
-      bookingkey,
-      customerkey,
-      servicekey,
-      staffkey,
-      date,
-      datetime, // e.g. "10:45, 20/09/2025"
-      note,
-      customername,
-      customeremail,
-      customerphone,
-      staffname,
-      servicename,
-      userkey
-    } = req.body;
-
-    // Validate required fields (customerkey may be resolved from phone/email)
-    if (!servicekey || !staffkey || !datetime) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-
-    // Resolve or create customer:
-    // - If `customerkey` provided and >0 use it
-    // - Else try to find by `customerphone`, then by `customeremail`
-    // - If not found, insert a new customer and use its pkey
-    let resolvedCustomerKey = customerkey && Number(customerkey) > 0 ? Number(customerkey) : null;
-
-    if (!resolvedCustomerKey) {
-      // normalize inputs
-      const phone = customerphone ? String(customerphone).trim() : null;
-      const email = customeremail ? String(customeremail).trim().toLowerCase() : null;
-
-      if (phone) {
-        const foundByPhone = await db.sequelize.query(
-          "SELECT pkey FROM tblcustomer WHERE phone = :phone AND dateinactivated IS NULL LIMIT 1",
-          { replacements: { phone }, type: db.sequelize.QueryTypes.SELECT }
-        );
-        if (Array.isArray(foundByPhone) && foundByPhone.length > 0) {
-          resolvedCustomerKey = foundByPhone[0].pkey;
-        }
-      }
-
-      if (!resolvedCustomerKey && email) {
-        const foundByEmail = await db.sequelize.query(
-          "SELECT pkey FROM tblcustomer WHERE LOWER(email) = :email AND dateinactivated IS NULL LIMIT 1",
-          { replacements: { email }, type: db.sequelize.QueryTypes.SELECT }
-        );
-        if (Array.isArray(foundByEmail) && foundByEmail.length > 0) {
-          resolvedCustomerKey = foundByEmail[0].pkey;
-        }
-      }
-
-      if (!resolvedCustomerKey) {
-        // insert new customer
-        const insertCustomerQuery = `
-          INSERT INTO tblcustomer (fullname, email, phone, type, dateactivated, numbooking)
-          VALUES (:fullname, :email, :phone, :type, NOW(), 0)
-        `;
-        const ins = await db.sequelize.query(insertCustomerQuery, {
-          replacements: {
-            fullname: customername || null,
-            email: email || null,
-            phone: phone || null,
-            type: 'customer'
-          },
-          type: db.sequelize.QueryTypes.INSERT,
-        });
-        // Sequelize returns array where first element is insertId
-        resolvedCustomerKey = ins[0];
-      }
-    }
-
-    // ⏰ Convert "10:45, 20/09/2025" → MySQL DATETIME "2025-09-20 10:45:00"
-    function formatToMySQLDatetime(dtStr) {
-      const [time, datePart] = dtStr.split(",").map((s) => s.trim());
-      const [hour, minute] = time.split(":");
-      const [day, month, year] = datePart.split("/");
-      return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")} ${hour.padStart(
-        2,
-        "0"
-      )}:${minute.padStart(2, "0")}:00`;
-    }
-
-    const bookingStart = formatToMySQLDatetime(datetime);
-
-    // 💡 Calculate booking end = start + 45 minutes
-    const bookingEnd = new Date(bookingStart);
-    bookingEnd.setMinutes(bookingEnd.getMinutes() + 45);
-
-    // Convert back to MySQL string format
-    const bookingEndStr = bookingEnd.toISOString().slice(0, 19).replace("T", " ");
-
-    if (bookingkey && Number(bookingkey) > 0) {
-      // 🔄 UPDATE existing booking
-      const updateQuery = `
-        UPDATE tblbooking
-        SET customerkey = :customerkey,
-            servicekey = :servicekey,
-            staffkey = :staffkey,
-            customeremail = :customeremail,
-            customerphone = :customerphone,
-            date = DATE(:datetime),
-             datetime = :datetime,
-            bookingstart = :bookingstart,
-            bookingend = :bookingend,
-            note = :note,
-            customername = :customername,
-            staffname = :staffname,
-            servicename = :servicename,
-            userkey = :userkey,
-            dateactivated = COALESCE(dateactivated, NOW())
-        WHERE pkey = :bookingkey
-      `;
-
-      await db.sequelize.query(updateQuery, {
-        replacements: {
-          bookingkey: Number(bookingkey),
-          customerkey: resolvedCustomerKey,
-          servicekey,
-          staffkey,
-          customeremail,
-          customerphone,
-          datetime: bookingStart,
-          bookingstart: bookingStart,
-          bookingend: bookingEndStr,
-          note,
-          customername,
-          staffname,
-          servicename,
-          userkey,
-        },
-        type: db.sequelize.QueryTypes.UPDATE,
-      });
-
-      return res
-        .status(201)
-        .json({ message: "Booking updated successfully", bookingkey: Number(bookingkey) });
-    } else {
-      // 🆕 INSERT new booking
-      const insertQuery = `
-        INSERT INTO tblbooking 
-        (customerkey, servicekey, staffkey,date, datetime, bookingstart, bookingend, 
-         customeremail, customerphone,
-         dateactivated, note, customername, staffname, servicename, userkey)
-        VALUES 
-        (:customerkey, :servicekey, :staffkey, CURDATE(), NOW(), :bookingstart, :bookingend, 
-         :customeremail, :customerphone,
-         NOW(), :note, :customername, :staffname, :servicename, :userkey)
-      `;
-
-      const objstore = await db.sequelize.query(insertQuery, {
-        replacements: {
-          customerkey: resolvedCustomerKey,
-          servicekey,
-          staffkey,
-          customeremail,
-          customerphone,
-          bookingstart: bookingStart,
-          bookingend: bookingEndStr,
-          note,
-          customername,
-          staffname,
-          servicename,
-          userkey,
-        },
-        type: db.sequelize.QueryTypes.INSERT,
-      });
-
-      return res.status(201).json({
-        message: "Booking added successfully",
-        bookingkey: objstore[0],
-      });
-    }
-  } catch (err) {
-    console.error("Database Save Error:", err);
-    res.status(500).json({ error: "Internal Server Error", details: err.message });
-  }
-};
-
-exports._bookingweb_save = async (req, res) => {
   console.log("Received booking save request:", req.body);
 
   try {
@@ -347,7 +155,7 @@ exports._bookingweb_save = async (req, res) => {
             fullname: customername || null,
             email: email || null,
             phone: phone || null,
-            type: 'online'
+            type: 'customer'
           },
           type: db.sequelize.QueryTypes.INSERT,
         });
@@ -371,8 +179,10 @@ exports._bookingweb_save = async (req, res) => {
     const bookingEndStr = bookingEnd.toISOString().slice(0, 19).replace("T", " ");
 
     let newBookingKey = bookingkey;
+    let isNewBooking = false;
 
     if (bookingkey && Number(bookingkey) > 0) {
+      // UPDATE existing booking
       const updateQuery = `
         UPDATE tblbooking
         SET customerkey = :customerkey,
@@ -414,7 +224,30 @@ exports._bookingweb_save = async (req, res) => {
       });
 
       newBookingKey = Number(bookingkey);
+
+      // 📧 Send modification notifications
+      if (customeremail || customerphone) {
+        const notificationData = {
+          bookingkey: newBookingKey,
+          customername: customername || 'Guest',
+          customeremail,
+          customerphone,
+          datetime: formatDatetimeForDisplay(bookingStart),
+          servicename: servicename || 'Service',
+          staffname: staffname || 'Staff'
+        };
+
+        Promise.all([
+          notifications.sendBookingModificationEmail(notificationData),
+          notifications.sendBookingModificationSMS(notificationData)
+        ]).then(results => {
+          console.log('📬 Modification notification results:', results);
+        }).catch(err => {
+          console.error('⚠️ Modification notification error (non-critical):', err);
+        });
+      }
     } else {
+      // INSERT new booking
       const insertQuery = `
         INSERT INTO tblbooking 
         (customerkey, servicekey, staffkey, date, datetime, bookingstart, bookingend, 
@@ -445,30 +278,324 @@ exports._bookingweb_save = async (req, res) => {
       });
 
       newBookingKey = objstore[0];
+      isNewBooking = true;
+
+      // ✅ Increment numbooking for customer
+      await db.sequelize.query(
+        "UPDATE tblcustomer SET numbooking = numbooking + 1 WHERE pkey = :customerkey",
+        {
+          replacements: { customerkey: resolvedCustomerKey },
+          type: db.sequelize.QueryTypes.UPDATE
+        }
+      );
+
+      console.log('✅ Incremented numbooking for customer:', resolvedCustomerKey);
+
+      // 📧 Send confirmation notifications (only for new bookings)
+      if (customeremail || customerphone) {
+        const notificationData = {
+          bookingkey: newBookingKey,
+          customername: customername || 'Guest',
+          customeremail,
+          customerphone,
+          datetime: formatDatetimeForDisplay(bookingStart),
+          servicename: servicename || 'Service',
+          staffname: staffname || 'Staff'
+        };
+
+        Promise.all([
+          notifications.sendBookingEmail(notificationData),
+          notifications.sendBookingSMS(notificationData)
+        ]).then(results => {
+          console.log('📬 Notification results:', results);
+        }).catch(err => {
+          console.error('⚠️ Notification error (non-critical):', err);
+        });
+      }
     }
 
-    // 🎟️ Generate customer token
-    const customerToken = jwt.sign(
+    return res.status(isNewBooking ? 201 : 200).json({
+      message: isNewBooking ? "Booking added successfully" : "Booking updated successfully",
+      bookingkey: newBookingKey,
+    });
+  } catch (err) {
+    console.error("Database Save Error:", err);
+    res.status(500).json({ error: "Internal Server Error", details: err.message });
+  }
+};
+
+exports._booking_del = async (req, res) => {
+  try {
+    const pkey = req.params.pkey || (req.body && req.body.pkey);
+
+    if (!pkey) {
+      return res.status(400).json({ error: "Missing pkey" });
+    }
+
+    // 📧 Get booking details BEFORE deletion for email notification
+    const bookingDetails = await db.sequelize.query(
+      `SELECT customername, customeremail, customerphone, datetime, bookingstart, 
+              servicename, staffname 
+       FROM tblbooking 
+       WHERE pkey = :pkey AND dateinactivated IS NULL`,
       {
-        customerkey: resolvedCustomerKey,
-        email: customeremail,
-        phone: customerphone,
-        name: customername,
-        type: 'web_customer'
+        replacements: { pkey },
+        type: db.sequelize.QueryTypes.SELECT
+      }
+    );
+
+    const updateQuery = `
+      UPDATE tblbooking
+      SET dateinactivated = NOW()
+      WHERE pkey = :pkey
+    `;
+
+    await db.sequelize.query(updateQuery, {
+      replacements: { pkey },
+      type: db.sequelize.QueryTypes.UPDATE,
+    });
+
+    // 📧 Send cancellation notifications if booking existed
+    if (bookingDetails && bookingDetails.length > 0) {
+      const booking = bookingDetails[0];
+      if (booking.customeremail || booking.customerphone) {
+        const notificationData = {
+          bookingkey: pkey,
+          customername: booking.customername || 'Guest',
+          customeremail: booking.customeremail,
+          customerphone: booking.customerphone,
+          datetime: formatDatetimeForDisplay(booking.bookingstart || booking.datetime),
+          servicename: booking.servicename || 'Service',
+          staffname: booking.staffname || 'Staff'
+        };
+
+        Promise.all([
+          notifications.sendBookingCancellationEmail(notificationData),
+          notifications.sendBookingCancellationSMS(notificationData)
+        ]).then(results => {
+          console.log('📬 Cancellation notification results:', results);
+        }).catch(err => {
+          console.error('⚠️ Cancellation notification error (non-critical):', err);
+        });
+      }
+    }
+
+    res.status(200).json({ message: "Booking deleted successfully" });
+  } catch (err) {
+    console.error("Database Delete Error:", err);
+    res.status(500).json({ error: "Internal Server Error", details: err.message });
+  }
+};
+
+exports._customer_cancel_booking = async (req, res) => {
+  try {
+    const token = req.headers['authorization'];
+    const { bookingkey } = req.body;
+
+    console.log('🚫 Cancel booking request:', { bookingkey });
+
+    if (!token) {
+      return res.status(403).json({ message: "No token provided" });
+    }
+
+    if (!bookingkey) {
+      return res.status(400).json({ error: "Missing bookingkey" });
+    }
+
+    const tokenPart = token.includes(' ') ? token.split(' ')[1] : token;
+
+    let decoded;
+    try {
+      decoded = jwt.verify(tokenPart, config.secret);
+      console.log('✅ Token decoded for cancel:', decoded);
+    } catch (verifyErr) {
+      console.error('❌ Token verification failed:', verifyErr.message);
+      return res.status(401).json({ error: "Invalid or expired token", details: verifyErr.message });
+    }
+
+    if (!decoded.customerkey) {
+      return res.status(401).json({ error: "Invalid token: missing customerkey" });
+    }
+
+    // Get booking details for notification
+    const bookingCheck = await db.sequelize.query(
+      `SELECT pkey, customerkey, datetime, bookingstart, customername, customeremail, 
+              customerphone, servicename, staffname
+       FROM tblbooking 
+       WHERE pkey = :bookingkey 
+         AND customerkey = :customerkey 
+         AND dateinactivated IS NULL`,
+      {
+        replacements: {
+          bookingkey: Number(bookingkey),
+          customerkey: decoded.customerkey
+        },
+        type: db.sequelize.QueryTypes.SELECT
+      }
+    );
+
+    if (!bookingCheck || bookingCheck.length === 0) {
+      return res.status(404).json({ error: "Booking not found or does not belong to you" });
+    }
+
+    const booking = bookingCheck[0];
+
+    const bookingTime = new Date(booking.bookingstart || booking.datetime);
+    if (bookingTime < new Date()) {
+      return res.status(400).json({ error: "Cannot cancel past bookings" });
+    }
+
+    const cancelQuery = `
+      UPDATE tblbooking
+      SET dateinactivated = NOW()
+      WHERE pkey = :bookingkey
+    `;
+
+    await db.sequelize.query(cancelQuery, {
+      replacements: { bookingkey: Number(bookingkey) },
+      type: db.sequelize.QueryTypes.UPDATE,
+    });
+
+    console.log('✅ Booking cancelled:', bookingkey);
+
+    // 📧 Send cancellation notifications
+    if (booking.customeremail || booking.customerphone) {
+      const notificationData = {
+        bookingkey: Number(bookingkey),
+        customername: booking.customername || 'Guest',
+        customeremail: booking.customeremail,
+        customerphone: booking.customerphone,
+        datetime: formatDatetimeForDisplay(booking.bookingstart || booking.datetime),
+        servicename: booking.servicename || 'Service',
+        staffname: booking.staffname || 'Staff'
+      };
+
+      Promise.all([
+        notifications.sendBookingCancellationEmail(notificationData),
+        notifications.sendBookingCancellationSMS(notificationData)
+      ]).then(results => {
+        console.log('📬 Cancellation notification results:', results);
+      }).catch(err => {
+        console.error('⚠️ Cancellation notification error (non-critical):', err);
+      });
+    }
+
+    res.status(200).json({
+      message: "Booking cancelled successfully",
+      bookingkey: Number(bookingkey)
+    });
+
+  } catch (err) {
+    console.error("❌ Cancel booking error:", err);
+    res.status(500).json({ error: "Internal Server Error", details: err.message });
+  }
+};
+
+// Customer login
+// POST /api/booking/customer/login
+// Body: { identifier, password } - identifier can be email or phone
+exports._customer_login = async (req, res) => {
+  try {
+    // Add detailed logging
+    console.log('📥 Login request received:');
+    console.log('  - Body:', req.body);
+    console.log('  - Headers:', req.headers);
+
+    // Accept both 'identifier' and 'emailOrPhone' field names
+    const identifier = req.body.identifier || req.body.emailOrPhone;
+    const password = req.body.password;
+
+    console.log('🔐 Customer login attempt:', {
+      identifier,
+      hasPassword: !!password,
+      identifierType: typeof identifier,
+      passwordType: typeof password
+    });
+
+    if (!identifier || !password) {
+      console.log('❌ Validation failed - missing fields:', {
+        hasIdentifier: !!identifier,
+        hasPassword: !!password,
+        bodyKeys: Object.keys(req.body)
+      });
+      return res.status(400).json({
+        error: "Missing identifier or password",
+        received: {
+          identifier: identifier ? 'present' : 'missing',
+          password: password ? 'present' : 'missing',
+          bodyKeys: Object.keys(req.body)
+        }
+      });
+    }
+
+    // Normalize identifier
+    const normalizedIdentifier = String(identifier).trim().toLowerCase();
+
+    // Check if identifier is email or phone
+    const isEmail = normalizedIdentifier.includes('@');
+
+    // Query customer by email or phone
+    const query = isEmail
+      ? "SELECT pkey, fullname, email, phone, password, type, dateactivated FROM tblcustomer WHERE LOWER(email) = :identifier AND dateinactivated IS NULL LIMIT 1"
+      : "SELECT pkey, fullname, email, phone, password, type, dateactivated FROM tblcustomer WHERE phone = :identifier AND dateinactivated IS NULL LIMIT 1";
+
+    const customers = await db.sequelize.query(query, {
+      replacements: { identifier: normalizedIdentifier },
+      type: db.sequelize.QueryTypes.SELECT
+    });
+
+    if (!customers || customers.length === 0) {
+      console.log('❌ Customer not found:', normalizedIdentifier);
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    const customer = customers[0];
+
+    // Check if customer has a password set
+    if (!customer.password) {
+      console.log('❌ No password set for customer:', customer.pkey);
+      return res.status(401).json({ error: "Account has no password set. Please register first." });
+    }
+
+    // Verify password
+    const passwordIsValid = bcrypt.compareSync(password, customer.password);
+
+    if (!passwordIsValid) {
+      console.log('❌ Invalid password for customer:', customer.pkey);
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    // Generate customer token
+    const token = jwt.sign(
+      {
+        customerkey: customer.pkey,
+        email: customer.email,
+        phone: customer.phone,
+        name: customer.fullname,
+        type: customer.type || 'customer'
       },
       config.secret,
       { expiresIn: 86400 * 30 } // 30 days
     );
 
-    return res.status(201).json({
-      message: "Booking added successfully",
-      bookingkey: newBookingKey,
-      customerkey: resolvedCustomerKey,
-      token: customerToken
+    console.log('✅ Customer logged in:', customer.pkey);
+
+    // Return customer data (without password)
+    res.status(200).json({
+      message: "Login successful",
+      token: token,
+      customer: {
+        pkey: customer.pkey,
+        fullname: customer.fullname,
+        email: customer.email,
+        phone: customer.phone,
+        type: customer.type,
+        dateactivated: customer.dateactivated
+      }
     });
 
   } catch (err) {
-    console.error("Database Save Error:", err);
+    console.error("❌ Customer login error:", err);
     res.status(500).json({ error: "Internal Server Error", details: err.message });
   }
 };
@@ -485,7 +612,7 @@ exports._customer_profile = async (req, res) => {
     const decoded = jwt.verify(token.split(' ')[1], config.secret);
 
     const customer = await db.sequelize.query(
-      "SELECT pkey, fullname, email, phone, type, dateactivated FROM tblcustomer WHERE pkey = :customerkey AND dateinactivated IS NULL",
+      "SELECT pkey, fullname, email, phone, type, birthday, dateactivated FROM tblcustomer WHERE pkey = :customerkey AND dateinactivated IS NULL",
       {
         replacements: { customerkey: decoded.customerkey },
         type: db.sequelize.QueryTypes.SELECT
@@ -518,7 +645,7 @@ exports._customer_bookings = async (req, res) => {
       `SELECT pkey, servicekey, staffkey, datetime, bookingstart, bookingend, 
               note, customername, staffname, servicename, dateactivated
        FROM tblbooking 
-       WHERE customerkey = :customerkey AND dateinactivated IS NULL
+       WHERE customerkey = :customerkey AND dateinactivated IS NULL and bookingstart >= NOW()
        ORDER BY datetime DESC`,
       {
         replacements: { customerkey: decoded.customerkey },
@@ -683,6 +810,377 @@ exports._register_member = async (req, res) => {
   } catch (err) {
     console.error("register-member error:", err);
     return res.status(500).json({ error: "Internal Server Error", details: err.message });
+  }
+};
+
+// Customer registration (public endpoint - no token required)
+// POST /api/booking/customer/register
+// Body: { fullname, email, phone, password, birthday }
+exports._customer_register = async (req, res) => {
+  try {
+    console.log('📝 Customer registration request:', req.body);
+
+    const { fullname, email, phone, password, birthday } = req.body;
+
+    // Validate required fields
+    if (!fullname || !email || !phone || !password) {
+      return res.status(400).json({
+        error: "Missing required fields",
+        required: ["fullname", "email", "phone", "password"]
+      });
+    }
+
+    // Normalize inputs
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const normalizedPhone = String(phone).trim();
+
+    // Hash password
+    const hashedPassword = bcrypt.hashSync(password, 8);
+
+    // Check if customer exists by email OR phone
+    const existingCustomer = await db.sequelize.query(
+      `SELECT pkey, fullname, email, phone, type, dateactivated 
+       FROM tblcustomer 
+       WHERE (LOWER(email) = :email OR phone = :phone) 
+         AND dateinactivated IS NULL 
+       LIMIT 1`,
+      {
+        replacements: { email: normalizedEmail, phone: normalizedPhone },
+        type: db.sequelize.QueryTypes.SELECT
+      }
+    );
+
+    if (existingCustomer && existingCustomer.length > 0) {
+      // Customer exists - UPDATE
+      const customer = existingCustomer[0];
+      console.log('📝 Customer exists, updating:', customer.pkey);
+
+      const updateQuery = `
+        UPDATE tblcustomer
+        SET fullname = :fullname,
+            email = :email,
+            phone = :phone,
+            password = :password,
+            birthday = :birthday,
+            type = COALESCE(type, 'member'),
+            dateactivated = COALESCE(dateactivated, NOW())
+        WHERE pkey = :customerkey
+      `;
+
+      await db.sequelize.query(updateQuery, {
+        replacements: {
+          customerkey: customer.pkey,
+          fullname,
+          email: normalizedEmail,
+          phone: normalizedPhone,
+          password: hashedPassword,
+          birthday: birthday || null
+        },
+        type: db.sequelize.QueryTypes.UPDATE
+      });
+
+      // Generate token for updated customer
+      const token = jwt.sign(
+        {
+          customerkey: customer.pkey,
+          email: normalizedEmail,
+          phone: normalizedPhone,
+          name: fullname,
+          type: 'member'
+        },
+        config.secret,
+        { expiresIn: 86400 * 30 } // 30 days
+      );
+
+      console.log('✅ Customer updated:', customer.pkey);
+
+      return res.status(200).json({
+        message: "Customer updated successfully",
+        token: token,
+        customer: {
+          pkey: customer.pkey,
+          fullname: fullname,
+          email: normalizedEmail,
+          phone: normalizedPhone,
+          birthday: birthday || null,
+          type: 'member'
+        }
+      });
+    } else {
+      // Customer does NOT exist - CREATE
+      console.log('📝 Creating new customer');
+
+      const insertQuery = `
+        INSERT INTO tblcustomer (fullname, email, phone, password, birthday, type, dateactivated, numbooking)
+        VALUES (:fullname, :email, :phone, :password, :birthday, 'member', NOW(), 0)
+      `;
+
+      const result = await db.sequelize.query(insertQuery, {
+        replacements: {
+          fullname,
+          email: normalizedEmail,
+          phone: normalizedPhone,
+          password: hashedPassword,
+          birthday: birthday || null
+        },
+        type: db.sequelize.QueryTypes.INSERT
+      });
+
+      const newCustomerKey = result[0];
+
+      // Generate token for new customer
+      const token = jwt.sign(
+        {
+          customerkey: newCustomerKey,
+          email: normalizedEmail,
+          phone: normalizedPhone,
+          name: fullname,
+          type: 'member'
+        },
+        config.secret,
+        { expiresIn: 86400 * 30 } // 30 days
+      );
+
+      console.log('✅ Customer created:', newCustomerKey);
+
+      return res.status(201).json({
+        message: "Customer registered successfully",
+        token: token,
+        customer: {
+          pkey: newCustomerKey,
+          fullname: fullname,
+          email: normalizedEmail,
+          phone: normalizedPhone,
+          birthday: birthday || null,
+          type: 'member'
+        }
+      });
+    }
+
+  } catch (err) {
+    console.error("❌ Customer registration error:", err);
+    res.status(500).json({ error: "Internal Server Error", details: err.message });
+  }
+};
+
+exports._bookingweb_save = async (req, res) => {
+  console.log("Received booking save request:", req.body);
+
+  try {
+    const {
+      bookingkey,
+      customerkey,
+      servicekey,
+      staffkey,
+      date,
+      datetime,
+      note,
+      customername,
+      customeremail,
+      customerphone,
+      staffname,
+      servicename,
+      userkey
+    } = req.body;
+
+    if (!servicekey || !staffkey || !datetime) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    let resolvedCustomerKey = customerkey && Number(customerkey) > 0 ? Number(customerkey) : null;
+
+    if (!resolvedCustomerKey) {
+      const phone = customerphone ? String(customerphone).trim() : null;
+      const email = customeremail ? String(customeremail).trim().toLowerCase() : null;
+
+      if (phone) {
+        const foundByPhone = await db.sequelize.query(
+          "SELECT pkey FROM tblcustomer WHERE phone = :phone AND dateinactivated IS NULL LIMIT 1",
+          { replacements: { phone }, type: db.sequelize.QueryTypes.SELECT }
+        );
+        if (Array.isArray(foundByPhone) && foundByPhone.length > 0) {
+          resolvedCustomerKey = foundByPhone[0].pkey;
+        }
+      }
+
+      if (!resolvedCustomerKey && email) {
+        const foundByEmail = await db.sequelize.query(
+          "SELECT pkey FROM tblcustomer WHERE LOWER(email) = :email AND dateinactivated IS NULL LIMIT 1",
+          { replacements: { email }, type: db.sequelize.QueryTypes.SELECT }
+        );
+        if (Array.isArray(foundByEmail) && foundByEmail.length > 0) {
+          resolvedCustomerKey = foundByEmail[0].pkey;
+        }
+      }
+
+      if (!resolvedCustomerKey) {
+        const insertCustomerQuery = `
+          INSERT INTO tblcustomer (fullname, email, phone, type, dateactivated, numbooking)
+          VALUES (:fullname, :email, :phone, :type, NOW(), 0)
+        `;
+        const ins = await db.sequelize.query(insertCustomerQuery, {
+          replacements: {
+            fullname: customername || null,
+            email: email || null,
+            phone: phone || null,
+            type: 'online'
+          },
+          type: db.sequelize.QueryTypes.INSERT,
+        });
+        resolvedCustomerKey = ins[0];
+      }
+    }
+
+    function formatToMySQLDatetime(dtStr) {
+      const [time, datePart] = dtStr.split(",").map((s) => s.trim());
+      const [hour, minute] = time.split(":");
+      const [day, month, year] = datePart.split("/");
+      return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")} ${hour.padStart(
+        2,
+        "0"
+      )}:${minute.padStart(2, "0")}:00`;
+    }
+
+    const bookingStart = formatToMySQLDatetime(datetime);
+    const bookingEnd = new Date(bookingStart);
+    bookingEnd.setMinutes(bookingEnd.getMinutes() + 45);
+    const bookingEndStr = bookingEnd.toISOString().slice(0, 19).replace("T", " ");
+
+    let newBookingKey = bookingkey;
+    let isNewBooking = false;
+
+    if (bookingkey && Number(bookingkey) > 0) {
+      const updateQuery = `
+        UPDATE tblbooking
+        SET customerkey = :customerkey,
+            servicekey = :servicekey,
+            staffkey = :staffkey,
+            customeremail = :customeremail,
+            customerphone = :customerphone,
+            date = DATE(:datetime),
+            datetime = :datetime,
+            bookingstart = :bookingstart,
+            bookingend = :bookingend,
+            note = :note,
+            customername = :customername,
+            staffname = :staffname,
+            servicename = :servicename,
+            userkey = :userkey,
+            dateactivated = COALESCE(dateactivated, NOW())
+        WHERE pkey = :bookingkey
+      `;
+
+      await db.sequelize.query(updateQuery, {
+        replacements: {
+          bookingkey: Number(bookingkey),
+          customerkey: resolvedCustomerKey,
+          servicekey,
+          staffkey,
+          customeremail,
+          customerphone,
+          datetime: bookingStart,
+          bookingstart: bookingStart,
+          bookingend: bookingEndStr,
+          note,
+          customername,
+          staffname,
+          servicename,
+          userkey,
+        },
+        type: db.sequelize.QueryTypes.UPDATE,
+      });
+
+      newBookingKey = Number(bookingkey);
+    } else {
+      const insertQuery = `
+        INSERT INTO tblbooking 
+        (customerkey, servicekey, staffkey, date, datetime, bookingstart, bookingend, 
+         customeremail, customerphone,
+         dateactivated, note, customername, staffname, servicename, userkey)
+        VALUES 
+        (:customerkey, :servicekey, :staffkey, CURDATE(), NOW(), :bookingstart, :bookingend, 
+         :customeremail, :customerphone,
+         NOW(), :note, :customername, :staffname, :servicename, :userkey)
+      `;
+
+      const objstore = await db.sequelize.query(insertQuery, {
+        replacements: {
+          customerkey: resolvedCustomerKey,
+          servicekey,
+          staffkey,
+          customeremail,
+          customerphone,
+          bookingstart: bookingStart,
+          bookingend: bookingEndStr,
+          note,
+          customername,
+          staffname,
+          servicename,
+          userkey,
+        },
+        type: db.sequelize.QueryTypes.INSERT,
+      });
+
+      newBookingKey = objstore[0];
+      isNewBooking = true;
+
+      // ✅ Increment numbooking for customer
+      await db.sequelize.query(
+        "UPDATE tblcustomer SET numbooking = numbooking + 1 WHERE pkey = :customerkey",
+        {
+          replacements: { customerkey: resolvedCustomerKey },
+          type: db.sequelize.QueryTypes.UPDATE
+        }
+      );
+
+      console.log('✅ Incremented numbooking for customer:', resolvedCustomerKey);
+    }
+
+    // Generate customer token
+    const customerToken = jwt.sign(
+      {
+        customerkey: resolvedCustomerKey,
+        email: customeremail,
+        phone: customerphone,
+        name: customername,
+        type: 'web_customer'
+      },
+      config.secret,
+      { expiresIn: 86400 * 30 }
+    );
+
+    // 📧 Send confirmation notifications (only for new bookings)
+    if (isNewBooking && (customeremail || customerphone)) {
+      const notificationData = {
+        bookingkey: newBookingKey,
+        customername: customername || 'Guest',
+        customeremail,
+        customerphone,
+        datetime: formatDatetimeForDisplay(bookingStart),
+        servicename: servicename || 'Service',
+        staffname: staffname || 'Staff'
+      };
+
+      Promise.all([
+        notifications.sendBookingEmail(notificationData),
+        notifications.sendBookingSMS(notificationData)
+      ]).then(results => {
+        console.log('📬 Notification results:', results);
+      }).catch(err => {
+        console.error('⚠️ Notification error (non-critical):', err);
+      });
+    }
+
+    return res.status(201).json({
+      message: "Booking added successfully",
+      bookingkey: newBookingKey,
+      customerkey: resolvedCustomerKey,
+      token: customerToken
+    });
+
+  } catch (err) {
+    console.error("Database Save Error:", err);
+    res.status(500).json({ error: "Internal Server Error", details: err.message });
   }
 };
 

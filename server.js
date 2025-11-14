@@ -1,3 +1,4 @@
+require('dotenv').config(); // Add at the top of server.js
 const express = require("express");
 const cors = require("cors");
 const app = express();
@@ -26,6 +27,6 @@ app.listen(PORT, () => {
 });
 
 
- require('./app/routes/auth.routes')(app);
- require('./app/routes/booking.routes')(app);
+require('./app/routes/auth.routes')(app);
+require('./app/routes/booking.routes')(app);
 

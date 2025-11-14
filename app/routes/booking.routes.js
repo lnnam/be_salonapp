@@ -32,17 +32,26 @@ module.exports = function (app) {
     next();
   });
 
-  app.get("/api/booking/list", verifyToken, controller._booking_list);
-  app.get("/api/booking/staff", controller._booking_staff); // Public
-  app.get("/api/booking/service", controller._booking_service); // Public
-  app.get("/api/booking/customer", verifyToken, controller._booking_customer);
-  app.post("/api/booking/save", verifyToken, controller._booking_save);
+  // Public customer endpoints (no token required)
+  app.post("/api/booking/customer/register", controller._customer_register);
+  app.post("/api/booking/customer/login", controller._customer_login);
   app.post("/api/booking/websave", controller._bookingweb_save);
-  app.post("/api/booking/customer/register-member", verifyToken, controller._register_member);
+  app.get("/api/booking/staff", controller._booking_staff);
+  app.get("/api/booking/service", controller._booking_service);
   app.get("/api/booking/getavailability", controller._getavailability);
-  app.delete("/api/booking/del/:pkey", verifyToken, controller._booking_del);
+
+  // Protected customer endpoints (token required)
   app.get("/api/booking/customer/profile", controller._customer_profile);
   app.get("/api/booking/customer/bookings", controller._customer_bookings);
+  app.post("/api/booking/customer/cancel", controller._customer_cancel_booking);
+  app.post("/api/booking/cancel", controller._customer_cancel_booking); // Alias
+
+  // Admin endpoints (verifyToken required)
+  app.get("/api/booking/list", verifyToken, controller._booking_list);
+  app.get("/api/booking/customer", verifyToken, controller._booking_customer);
+  app.post("/api/booking/save", verifyToken, controller._booking_save);
+  app.post("/api/booking/customer/register-member", verifyToken, controller._register_member);
+  app.delete("/api/booking/del/:pkey", verifyToken, controller._booking_del);
 
 };
 

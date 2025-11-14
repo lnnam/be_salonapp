@@ -11,9 +11,12 @@
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.9.4",
-    "sequelize": "^6.37.3"
+    "nodemailer": "^7.0.10",
+    "sequelize": "^6.37.3",
+    "twilio": "^5.10.5"
   }
 }
