@@ -6,10 +6,12 @@ const db = require("../models");
 const EMAIL_ENABLED = process.env.ENABLE_EMAIL_NOTIFICATIONS === 'true';
 const SMS_ENABLED = process.env.ENABLE_SMS_NOTIFICATIONS === 'true';
 const SALON_KEY = process.env.SALON_KEY || 1;
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
 console.log('📧 Email notifications:', EMAIL_ENABLED ? 'ENABLED' : 'DISABLED');
 console.log('📱 SMS notifications:', SMS_ENABLED ? 'ENABLED' : 'DISABLED');
 console.log('🏢 Salon Key:', SALON_KEY);
+console.log('🌐 Frontend URL:', FRONTEND_URL);
 
 // Email transporter (only initialize if enabled)
 let emailTransporter = null;
@@ -93,6 +95,43 @@ async function getSalonInfo() {
 }
 
 /**
+ * Generate action buttons HTML
+ */
+function getActionButtons(bookingkey, token, showCancel = true, showChange = true) {
+    const cancelUrl = `${FRONTEND_URL}/booking/cancel?bookingkey=${bookingkey}&token=${encodeURIComponent(token)}`;
+    const changeUrl = `${FRONTEND_URL}/booking/modify?bookingkey=${bookingkey}&token=${encodeURIComponent(token)}`;
+    const viewUrl = `${FRONTEND_URL}/booking/view?bookingkey=${bookingkey}&token=${encodeURIComponent(token)}`;
+
+    let buttonsHtml = '<div style="text-align: center; margin: 30px 0;">';
+
+    if (showChange) {
+        buttonsHtml += `
+            <a href="${changeUrl}" style="display: inline-block; background-color: #FF9800; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin: 5px; font-weight: bold;">
+                📝 Change Booking
+            </a>
+        `;
+    }
+
+    if (showCancel) {
+        buttonsHtml += `
+            <a href="${cancelUrl}" style="display: inline-block; background-color: #F44336; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin: 5px; font-weight: bold;">
+                ❌ Cancel Booking
+            </a>
+        `;
+    }
+
+    buttonsHtml += `
+        <a href="${viewUrl}" style="display: inline-block; background-color: #2196F3; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin: 5px; font-weight: bold;">
+            👁️ View Details
+        </a>
+    `;
+
+    buttonsHtml += '</div>';
+
+    return buttonsHtml;
+}
+
+/**
  * Send booking confirmation email
  */
 exports.sendBookingEmail = async (bookingData) => {
@@ -107,22 +146,22 @@ exports.sendBookingEmail = async (bookingData) => {
     }
 
     try {
-        const { customeremail, customername, datetime, servicename, staffname, bookingkey } = bookingData;
+        const { customeremail, customername, datetime, servicename, staffname, bookingkey, token } = bookingData;
 
         if (!customeremail) {
             console.log('⚠️ No email provided, skipping email notification');
             return { success: false, reason: 'No email provided' };
         }
 
-        // Get salon information
         const salon = await getSalonInfo();
 
-        // Build logo HTML if photo exists
         const logoHtml = salon.photobase64
             ? `<img src="data:image/png;base64,${salon.photobase64}" alt="${salon.name}" style="max-width: 200px; margin-bottom: 20px;">`
             : salon.photo
                 ? `<img src="${salon.photo}" alt="${salon.name}" style="max-width: 200px; margin-bottom: 20px;">`
                 : '';
+
+        const actionButtons = token ? getActionButtons(bookingkey, token, true, true) : '';
 
         const mailOptions = {
             from: process.env.SMTP_FROM || `"${salon.name}" <${salon.email}>`,
@@ -144,8 +183,10 @@ exports.sendBookingEmail = async (bookingData) => {
             <p style="margin: 10px 0;"><strong>Date & Time:</strong> ${datetime}</p>
           </div>
           
+          ${actionButtons}
+          
           <p style="color: #666;">
-            <strong>Important:</strong> If you need to reschedule or cancel, please contact us at least 24 hours in advance.
+            <strong>Important:</strong> If you need to reschedule or cancel, please use the buttons above or contact us at least 24 hours in advance.
           </p>
           
           <p>Thank you for choosing ${salon.name}!</p>
@@ -163,6 +204,170 @@ exports.sendBookingEmail = async (bookingData) => {
 
         const info = await emailTransporter.sendMail(mailOptions);
         console.log('✅ Email sent:', info.messageId);
+        return { success: true, messageId: info.messageId };
+    } catch (error) {
+        console.error('❌ Email send error:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+/**
+ * Send booking modification email
+ */
+exports.sendBookingModificationEmail = async (bookingData) => {
+    if (!EMAIL_ENABLED) {
+        console.log('⚠️ Email notifications are disabled');
+        return { success: false, reason: 'Email notifications disabled' };
+    }
+
+    if (!emailTransporter) {
+        console.log('⚠️ Email transporter not initialized');
+        return { success: false, reason: 'Email transporter not configured' };
+    }
+
+    try {
+        const { customeremail, customername, datetime, servicename, staffname, bookingkey, token } = bookingData;
+
+        if (!customeremail) {
+            console.log('⚠️ No email provided, skipping email notification');
+            return { success: false, reason: 'No email provided' };
+        }
+
+        const salon = await getSalonInfo();
+
+        const logoHtml = salon.photobase64
+            ? `<img src="data:image/png;base64,${salon.photobase64}" alt="${salon.name}" style="max-width: 200px; margin-bottom: 20px;">`
+            : salon.photo
+                ? `<img src="${salon.photo}" alt="${salon.name}" style="max-width: 200px; margin-bottom: 20px;">`
+                : '';
+
+        const actionButtons = token ? getActionButtons(bookingkey, token, true, true) : '';
+
+        const mailOptions = {
+            from: process.env.SMTP_FROM || `"${salon.name}" <${salon.email}>`,
+            to: customeremail,
+            subject: `Booking Modified - ${salon.name}`,
+            html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          ${logoHtml}
+          <h2 style="color: #FF9800; border-bottom: 2px solid #FF9800; padding-bottom: 10px;">
+            Booking Modified
+          </h2>
+          <p>Dear ${customername || 'Valued Customer'},</p>
+          <p>Your booking has been successfully updated.</p>
+          
+          <div style="background-color: #FFF3E0; padding: 20px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #FF9800;">
+            <p style="margin: 10px 0;"><strong>Booking ID:</strong> #${bookingkey}</p>
+            <p style="margin: 10px 0;"><strong>New Service:</strong> ${servicename}</p>
+            <p style="margin: 10px 0;"><strong>New Staff:</strong> ${staffname}</p>
+            <p style="margin: 10px 0;"><strong>New Date & Time:</strong> ${datetime}</p>
+          </div>
+          
+          ${actionButtons}
+          
+          <p style="color: #666;">
+            <strong>Note:</strong> If you need to make further changes or cancel, please use the buttons above or contact us at least 24 hours in advance.
+          </p>
+          
+          <p>Thank you for choosing ${salon.name}!</p>
+          
+          ${salon.phone ? `<p style="color: #666;">📞 Contact us: ${salon.phone}</p>` : ''}
+          ${salon.email ? `<p style="color: #666;">📧 Email: ${salon.email}</p>` : ''}
+          
+          <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
+          <p style="color: #999; font-size: 12px; text-align: center;">
+            This is an automated message. Please do not reply directly to this email.
+          </p>
+        </div>
+      `
+        };
+
+        const info = await emailTransporter.sendMail(mailOptions);
+        console.log('✅ Modification email sent:', info.messageId);
+        return { success: true, messageId: info.messageId };
+    } catch (error) {
+        console.error('❌ Email send error:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+/**
+ * Send booking cancellation email (no action buttons)
+ */
+exports.sendBookingCancellationEmail = async (bookingData) => {
+    if (!EMAIL_ENABLED) {
+        console.log('⚠️ Email notifications are disabled');
+        return { success: false, reason: 'Email notifications disabled' };
+    }
+
+    if (!emailTransporter) {
+        console.log('⚠️ Email transporter not initialized');
+        return { success: false, reason: 'Email transporter not configured' };
+    }
+
+    try {
+        const { customeremail, customername, datetime, servicename, staffname, bookingkey } = bookingData;
+
+        if (!customeremail) {
+            console.log('⚠️ No email provided, skipping email notification');
+            return { success: false, reason: 'No email provided' };
+        }
+
+        const salon = await getSalonInfo();
+
+        const logoHtml = salon.photobase64
+            ? `<img src="data:image/png;base64,${salon.photobase64}" alt="${salon.name}" style="max-width: 200px; margin-bottom: 20px;">`
+            : salon.photo
+                ? `<img src="${salon.photo}" alt="${salon.name}" style="max-width: 200px; margin-bottom: 20px;">`
+                : '';
+
+        const bookAgainUrl = `${FRONTEND_URL}/booking`;
+
+        const mailOptions = {
+            from: process.env.SMTP_FROM || `"${salon.name}" <${salon.email}>`,
+            to: customeremail,
+            subject: `Booking Cancelled - ${salon.name}`,
+            html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          ${logoHtml}
+          <h2 style="color: #F44336; border-bottom: 2px solid #F44336; padding-bottom: 10px;">
+            Booking Cancelled
+          </h2>
+          <p>Dear ${customername || 'Valued Customer'},</p>
+          <p>Your booking has been cancelled as requested.</p>
+          
+          <div style="background-color: #FFEBEE; padding: 20px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #F44336;">
+            <p style="margin: 10px 0;"><strong>Booking ID:</strong> #${bookingkey}</p>
+            <p style="margin: 10px 0;"><strong>Service:</strong> ${servicename}</p>
+            <p style="margin: 10px 0;"><strong>Staff:</strong> ${staffname}</p>
+            <p style="margin: 10px 0;"><strong>Date & Time:</strong> ${datetime}</p>
+          </div>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${bookAgainUrl}" style="display: inline-block; background-color: #4CAF50; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+                📅 Book Again
+            </a>
+          </div>
+          
+          <p style="color: #666;">
+            We're sorry to see you cancel. If you'd like to reschedule, we'd be happy to help you find a new time.
+          </p>
+          
+          <p>We hope to see you again soon!</p>
+          
+          ${salon.phone ? `<p style="color: #666;">📞 Contact us: ${salon.phone}</p>` : ''}
+          ${salon.email ? `<p style="color: #666;">📧 Email: ${salon.email}</p>` : ''}
+          
+          <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
+          <p style="color: #999; font-size: 12px; text-align: center;">
+            This is an automated message. Please do not reply directly to this email.
+          </p>
+        </div>
+      `
+        };
+
+        const info = await emailTransporter.sendMail(mailOptions);
+        console.log('✅ Cancellation email sent:', info.messageId);
         return { success: true, messageId: info.messageId };
     } catch (error) {
         console.error('❌ Email send error:', error);
@@ -192,7 +397,6 @@ exports.sendBookingSMS = async (bookingData) => {
             return { success: false, reason: 'No phone provided' };
         }
 
-        // Get salon information
         const salon = await getSalonInfo();
 
         let formattedPhone = String(customerphone).trim();
@@ -210,158 +414,6 @@ exports.sendBookingSMS = async (bookingData) => {
         return { success: true, sid: message.sid };
     } catch (error) {
         console.error('❌ SMS send error:', error);
-        return { success: false, error: error.message };
-    }
-};
-
-/**
- * Send booking modification email
- */
-exports.sendBookingModificationEmail = async (bookingData) => {
-    if (!EMAIL_ENABLED) {
-        console.log('⚠️ Email notifications are disabled');
-        return { success: false, reason: 'Email notifications disabled' };
-    }
-
-    if (!emailTransporter) {
-        console.log('⚠️ Email transporter not initialized');
-        return { success: false, reason: 'Email transporter not configured' };
-    }
-
-    try {
-        const { customeremail, customername, datetime, servicename, staffname, bookingkey } = bookingData;
-
-        if (!customeremail) {
-            console.log('⚠️ No email provided, skipping email notification');
-            return { success: false, reason: 'No email provided' };
-        }
-
-        const salon = await getSalonInfo();
-
-        const logoHtml = salon.photobase64
-            ? `<img src="data:image/png;base64,${salon.photobase64}" alt="${salon.name}" style="max-width: 200px; margin-bottom: 20px;">`
-            : salon.photo
-                ? `<img src="${salon.photo}" alt="${salon.name}" style="max-width: 200px; margin-bottom: 20px;">`
-                : '';
-
-        const mailOptions = {
-            from: process.env.SMTP_FROM || `"${salon.name}" <${salon.email}>`,
-            to: customeremail,
-            subject: `Booking Modified - ${salon.name}`,
-            html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          ${logoHtml}
-          <h2 style="color: #FF9800; border-bottom: 2px solid #FF9800; padding-bottom: 10px;">
-            Booking Modified
-          </h2>
-          <p>Dear ${customername || 'Valued Customer'},</p>
-          <p>Your booking has been successfully updated.</p>
-          
-          <div style="background-color: #FFF3E0; padding: 20px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #FF9800;">
-            <p style="margin: 10px 0;"><strong>Booking ID:</strong> #${bookingkey}</p>
-            <p style="margin: 10px 0;"><strong>New Service:</strong> ${servicename}</p>
-            <p style="margin: 10px 0;"><strong>New Staff:</strong> ${staffname}</p>
-            <p style="margin: 10px 0;"><strong>New Date & Time:</strong> ${datetime}</p>
-          </div>
-          
-          <p style="color: #666;">
-            <strong>Note:</strong> If you need to make further changes or cancel, please contact us at least 24 hours in advance.
-          </p>
-          
-          <p>Thank you for choosing ${salon.name}!</p>
-          
-          ${salon.phone ? `<p style="color: #666;">📞 Contact us: ${salon.phone}</p>` : ''}
-          ${salon.email ? `<p style="color: #666;">📧 Email: ${salon.email}</p>` : ''}
-          
-          <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
-          <p style="color: #999; font-size: 12px; text-align: center;">
-            This is an automated message. Please do not reply directly to this email.
-          </p>
-        </div>
-      `
-        };
-
-        const info = await emailTransporter.sendMail(mailOptions);
-        console.log('✅ Modification email sent:', info.messageId);
-        return { success: true, messageId: info.messageId };
-    } catch (error) {
-        console.error('❌ Email send error:', error);
-        return { success: false, error: error.message };
-    }
-};
-
-/**
- * Send booking cancellation email
- */
-exports.sendBookingCancellationEmail = async (bookingData) => {
-    if (!EMAIL_ENABLED) {
-        console.log('⚠️ Email notifications are disabled');
-        return { success: false, reason: 'Email notifications disabled' };
-    }
-
-    if (!emailTransporter) {
-        console.log('⚠️ Email transporter not initialized');
-        return { success: false, reason: 'Email transporter not configured' };
-    }
-
-    try {
-        const { customeremail, customername, datetime, servicename, staffname, bookingkey } = bookingData;
-
-        if (!customeremail) {
-            console.log('⚠️ No email provided, skipping email notification');
-            return { success: false, reason: 'No email provided' };
-        }
-
-        const salon = await getSalonInfo();
-
-        const logoHtml = salon.photobase64
-            ? `<img src="data:image/png;base64,${salon.photobase64}" alt="${salon.name}" style="max-width: 200px; margin-bottom: 20px;">`
-            : salon.photo
-                ? `<img src="${salon.photo}" alt="${salon.name}" style="max-width: 200px; margin-bottom: 20px;">`
-                : '';
-
-        const mailOptions = {
-            from: process.env.SMTP_FROM || `"${salon.name}" <${salon.email}>`,
-            to: customeremail,
-            subject: `Booking Cancelled - ${salon.name}`,
-            html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          ${logoHtml}
-          <h2 style="color: #F44336; border-bottom: 2px solid #F44336; padding-bottom: 10px;">
-            Booking Cancelled
-          </h2>
-          <p>Dear ${customername || 'Valued Customer'},</p>
-          <p>Your booking has been cancelled as requested.</p>
-          
-          <div style="background-color: #FFEBEE; padding: 20px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #F44336;">
-            <p style="margin: 10px 0;"><strong>Booking ID:</strong> #${bookingkey}</p>
-            <p style="margin: 10px 0;"><strong>Service:</strong> ${servicename}</p>
-            <p style="margin: 10px 0;"><strong>Staff:</strong> ${staffname}</p>
-            <p style="margin: 10px 0;"><strong>Date & Time:</strong> ${datetime}</p>
-          </div>
-          
-          <p style="color: #666;">
-            We're sorry to see you cancel. If you'd like to reschedule, we'd be happy to help you find a new time.
-          </p>
-          
-          <p>We hope to see you again soon!</p>
-          
-          ${salon.phone ? `<p style="color: #666;">📞 Contact us: ${salon.phone}</p>` : ''}
-          ${salon.email ? `<p style="color: #666;">📧 Email: ${salon.email}</p>` : ''}
-          
-          <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
-          <p style="color: #999; font-size: 12px; text-align: center;">
-            This is an automated message. Please do not reply directly to this email.
-          </p>
-        </div>
-      `
-        };
-
-        const info = await emailTransporter.sendMail(mailOptions);
-        console.log('✅ Cancellation email sent:', info.messageId);
-        return { success: true, messageId: info.messageId };
-    } catch (error) {
-        console.error('❌ Email send error:', error);
         return { success: false, error: error.message };
     }
 };

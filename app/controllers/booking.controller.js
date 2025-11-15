@@ -120,8 +120,10 @@ exports._booking_save = async (req, res) => {
     }
 
     let resolvedCustomerKey = customerkey && Number(customerkey) > 0 ? Number(customerkey) : null;
+    const isUpdating = bookingkey && Number(bookingkey) > 0;
 
-    if (!resolvedCustomerKey) {
+    // ✅ Only resolve/create customer for NEW bookings
+    if (!isUpdating && !resolvedCustomerKey) {
       const phone = customerphone ? String(customerphone).trim() : null;
       const email = customeremail ? String(customeremail).trim().toLowerCase() : null;
 
@@ -161,6 +163,27 @@ exports._booking_save = async (req, res) => {
         });
         resolvedCustomerKey = ins[0];
       }
+    } else if (isUpdating && !resolvedCustomerKey) {
+      // ✅ For updates, get the existing customerkey from the booking
+      console.log('⚠️ No customerkey provided for update, fetching from existing booking');
+      const existingBooking = await db.sequelize.query(
+        "SELECT customerkey FROM tblbooking WHERE pkey = :bookingkey LIMIT 1",
+        {
+          replacements: { bookingkey: Number(bookingkey) },
+          type: db.sequelize.QueryTypes.SELECT
+        }
+      );
+      if (existingBooking && existingBooking.length > 0) {
+        resolvedCustomerKey = existingBooking[0].customerkey;
+        console.log('✅ Using existing customerkey:', resolvedCustomerKey);
+      } else {
+        return res.status(404).json({ error: "Booking not found" });
+      }
+    }
+
+    // ✅ Validate that we have a customer
+    if (!resolvedCustomerKey) {
+      return res.status(400).json({ error: "Unable to determine customer" });
     }
 
     function formatToMySQLDatetime(dtStr) {
@@ -181,8 +204,10 @@ exports._booking_save = async (req, res) => {
     let newBookingKey = bookingkey;
     let isNewBooking = false;
 
-    if (bookingkey && Number(bookingkey) > 0) {
+    if (isUpdating) {
       // UPDATE existing booking
+      console.log('📝 Updating booking:', bookingkey, 'with customerkey:', resolvedCustomerKey);
+
       const updateQuery = `
         UPDATE tblbooking
         SET customerkey = :customerkey,
@@ -225,6 +250,19 @@ exports._booking_save = async (req, res) => {
 
       newBookingKey = Number(bookingkey);
 
+      // Generate token for notifications
+      const customerToken = jwt.sign(
+        {
+          customerkey: resolvedCustomerKey,
+          email: customeremail,
+          phone: customerphone,
+          name: customername,
+          type: 'customer'
+        },
+        config.secret,
+        { expiresIn: 86400 * 30 }
+      );
+
       // 📧 Send modification notifications
       if (customeremail || customerphone) {
         const notificationData = {
@@ -234,7 +272,8 @@ exports._booking_save = async (req, res) => {
           customerphone,
           datetime: formatDatetimeForDisplay(bookingStart),
           servicename: servicename || 'Service',
-          staffname: staffname || 'Staff'
+          staffname: staffname || 'Staff',
+          token: customerToken
         };
 
         Promise.all([
@@ -248,6 +287,8 @@ exports._booking_save = async (req, res) => {
       }
     } else {
       // INSERT new booking
+      console.log('✨ Creating new booking with customerkey:', resolvedCustomerKey);
+
       const insertQuery = `
         INSERT INTO tblbooking 
         (customerkey, servicekey, staffkey, date, datetime, bookingstart, bookingend, 
@@ -291,6 +332,19 @@ exports._booking_save = async (req, res) => {
 
       console.log('✅ Incremented numbooking for customer:', resolvedCustomerKey);
 
+      // Generate customer token
+      const customerToken = jwt.sign(
+        {
+          customerkey: resolvedCustomerKey,
+          email: customeremail,
+          phone: customerphone,
+          name: customername,
+          type: 'customer'
+        },
+        config.secret,
+        { expiresIn: 86400 * 30 }
+      );
+
       // 📧 Send confirmation notifications (only for new bookings)
       if (customeremail || customerphone) {
         const notificationData = {
@@ -300,7 +354,8 @@ exports._booking_save = async (req, res) => {
           customerphone,
           datetime: formatDatetimeForDisplay(bookingStart),
           servicename: servicename || 'Service',
-          staffname: staffname || 'Staff'
+          staffname: staffname || 'Staff',
+          token: customerToken
         };
 
         Promise.all([
@@ -317,6 +372,7 @@ exports._booking_save = async (req, res) => {
     return res.status(isNewBooking ? 201 : 200).json({
       message: isNewBooking ? "Booking added successfully" : "Booking updated successfully",
       bookingkey: newBookingKey,
+      customerkey: resolvedCustomerKey
     });
   } catch (err) {
     console.error("Database Save Error:", err);
@@ -988,8 +1044,10 @@ exports._bookingweb_save = async (req, res) => {
     }
 
     let resolvedCustomerKey = customerkey && Number(customerkey) > 0 ? Number(customerkey) : null;
+    const isUpdating = bookingkey && Number(bookingkey) > 0;
 
-    if (!resolvedCustomerKey) {
+    // ✅ Only resolve/create customer for NEW bookings
+    if (!isUpdating && !resolvedCustomerKey) {
       const phone = customerphone ? String(customerphone).trim() : null;
       const email = customeremail ? String(customeremail).trim().toLowerCase() : null;
 
@@ -1029,6 +1087,27 @@ exports._bookingweb_save = async (req, res) => {
         });
         resolvedCustomerKey = ins[0];
       }
+    } else if (isUpdating && !resolvedCustomerKey) {
+      // ✅ For updates, get the existing customerkey from the booking
+      console.log('⚠️ No customerkey provided for update, fetching from existing booking');
+      const existingBooking = await db.sequelize.query(
+        "SELECT customerkey FROM tblbooking WHERE pkey = :bookingkey LIMIT 1",
+        {
+          replacements: { bookingkey: Number(bookingkey) },
+          type: db.sequelize.QueryTypes.SELECT
+        }
+      );
+      if (existingBooking && existingBooking.length > 0) {
+        resolvedCustomerKey = existingBooking[0].customerkey;
+        console.log('✅ Using existing customerkey:', resolvedCustomerKey);
+      } else {
+        return res.status(404).json({ error: "Booking not found" });
+      }
+    }
+
+    // ✅ Validate that we have a customer
+    if (!resolvedCustomerKey) {
+      return res.status(400).json({ error: "Unable to determine customer" });
     }
 
     function formatToMySQLDatetime(dtStr) {
@@ -1049,7 +1128,10 @@ exports._bookingweb_save = async (req, res) => {
     let newBookingKey = bookingkey;
     let isNewBooking = false;
 
-    if (bookingkey && Number(bookingkey) > 0) {
+    if (isUpdating) {
+      // UPDATE existing booking
+      console.log('📝 Updating booking:', bookingkey, 'with customerkey:', resolvedCustomerKey);
+
       const updateQuery = `
         UPDATE tblbooking
         SET customerkey = :customerkey,
@@ -1092,6 +1174,9 @@ exports._bookingweb_save = async (req, res) => {
 
       newBookingKey = Number(bookingkey);
     } else {
+      // INSERT new booking
+      console.log('✨ Creating new booking with customerkey:', resolvedCustomerKey);
+
       const insertQuery = `
         INSERT INTO tblbooking 
         (customerkey, servicekey, staffkey, date, datetime, bookingstart, bookingend, 
@@ -1158,7 +1243,8 @@ exports._bookingweb_save = async (req, res) => {
         customerphone,
         datetime: formatDatetimeForDisplay(bookingStart),
         servicename: servicename || 'Service',
-        staffname: staffname || 'Staff'
+        staffname: staffname || 'Staff',
+        token: customerToken  // ✅ Add token here
       };
 
       Promise.all([
