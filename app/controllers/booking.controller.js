@@ -417,14 +417,37 @@ exports._booking_del = async (req, res) => {
 
     const updateQuery = `
       UPDATE tblbooking
-      SET dateinactivated = NOW()
+      SET status = 'cancelled',
+          dateinactivated = NOW()
       WHERE pkey = :pkey
     `;
 
-    await db.sequelize.query(updateQuery, {
+    // Execute update and inspect result to ensure rows were affected
+    const updateResult = await db.sequelize.query(updateQuery, {
       replacements: { pkey },
       type: db.sequelize.QueryTypes.UPDATE,
     });
+
+    // Sequelize/mysql2 may return different shapes: log for debugging
+    console.log('Booking cancel update result:', updateResult);
+
+    // Determine affected rows in a robust way
+    let affectedRows = 0;
+    try {
+      // updateResult can be [result] or result depending on config
+      const first = Array.isArray(updateResult) ? updateResult[0] : updateResult;
+      if (first && typeof first.affectedRows !== 'undefined') affectedRows = first.affectedRows;
+      else if (typeof updateResult === 'number') affectedRows = updateResult;
+      else if (Array.isArray(updateResult) && typeof updateResult[1] === 'number') affectedRows = updateResult[1];
+    } catch (e) {
+      console.warn('Could not determine affectedRows from update result', e);
+    }
+
+    if (!affectedRows) {
+      console.warn(`No booking row was updated for pkey=${pkey}.`);
+      // still respond success for idempotency, but notify caller
+      return res.status(404).json({ error: 'Booking not found or already cancelled' });
+    }
 
     // 📧 Send cancellation notifications if booking existed
     if (bookingDetails && bookingDetails.length > 0) {
@@ -518,7 +541,8 @@ exports._customer_cancel_booking = async (req, res) => {
 
     const cancelQuery = `
       UPDATE tblbooking
-      SET dateinactivated = NOW()
+      SET status = 'cancelled',
+          dateinactivated = NOW()
       WHERE pkey = :bookingkey
     `;
 
@@ -1306,6 +1330,63 @@ exports._bookingweb_save = async (req, res) => {
       );
 
       console.log('✅ Incremented numbooking for customer:', resolvedCustomerKey);
+
+      // ✅ Send creation notifications for new bookings
+      try {
+        const customerInfo = await db.sequelize.query(
+          "SELECT email, phone, fullname FROM tblcustomer WHERE pkey = :customerkey LIMIT 1",
+          { replacements: { customerkey: resolvedCustomerKey }, type: db.sequelize.QueryTypes.SELECT }
+        );
+
+        let finalEmail = customeremail;
+        let finalPhone = customerphone;
+        let finalName = customername;
+        if (customerInfo && customerInfo.length > 0) {
+          finalEmail = finalEmail || customerInfo[0].email;
+          finalPhone = finalPhone || customerInfo[0].phone;
+          finalName = finalName || customerInfo[0].fullname;
+        }
+
+        const creationToken = jwt.sign(
+          {
+            customerkey: resolvedCustomerKey,
+            email: finalEmail,
+            phone: finalPhone,
+            name: finalName,
+            type: 'web_customer'
+          },
+          config.secret,
+          { expiresIn: 86400 * 30 }
+        );
+
+        const notificationData = {
+          bookingkey: newBookingKey,
+          customername: finalName || 'Guest',
+          customeremail: finalEmail,
+          customerphone: finalPhone,
+          datetime: formatDatetimeForDisplay(bookingStart),
+          servicename: servicename || 'Service',
+          staffname: staffname || 'Staff',
+          token: creationToken
+        };
+
+        console.log('📬 Sending new booking notifications to:', { email: finalEmail, phone: finalPhone });
+
+        if (finalEmail || finalPhone) {
+          Promise.all([
+            notifications.sendBookingEmail(notificationData),
+            notifications.sendBookingSMS(notificationData)
+          ]).then(results => {
+            console.log('📬 New booking notification results:', results);
+          }).catch(err => {
+            console.error('⚠️ New booking notification error (non-critical):', err);
+          });
+        } else {
+          console.log('⚠️ No email or phone available for new booking notifications');
+        }
+      } catch (notifyErr) {
+        console.error('❌ Error preparing new booking notifications:', notifyErr);
+      }
     }
 
     // Generate customer token (for response)
@@ -1460,7 +1541,8 @@ exports._email_cancel_booking = async (req, res) => {
     // Cancel the booking
     const cancelQuery = `
       UPDATE tblbooking
-      SET dateinactivated = NOW()
+      SET status = 'cancelled',
+          dateinactivated = NOW()
       WHERE pkey = :bookingkey
     `;
 
