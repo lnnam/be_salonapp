@@ -53,6 +53,10 @@ module.exports = function (app) {
   app.post("/api/booking/customer/register-member", verifyToken, controller._register_member);
   app.delete("/api/booking/del/:pkey", verifyToken, controller._booking_del);
 
+  // Email action endpoints (with token authentication)
+  app.get("/api/booking/email-cancel", controller._email_cancel_booking);
+  app.get("/api/booking/email-modify", controller._email_redirect_modify);
+  app.get("/api/booking/email-view", controller._email_redirect_view);
 };
 
 

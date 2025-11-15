@@ -208,6 +208,30 @@ exports._booking_save = async (req, res) => {
       // UPDATE existing booking
       console.log('📝 Updating booking:', bookingkey, 'with customerkey:', resolvedCustomerKey);
 
+      // ✅ Fetch customer email and phone from tblcustomer
+      const customerInfo = await db.sequelize.query(
+        "SELECT email, phone, fullname FROM tblcustomer WHERE pkey = :customerkey LIMIT 1",
+        {
+          replacements: { customerkey: resolvedCustomerKey },
+          type: db.sequelize.QueryTypes.SELECT
+        }
+      );
+
+      let finalEmail = customeremail;
+      let finalPhone = customerphone;
+      let finalName = customername;
+
+      if (customerInfo && customerInfo.length > 0) {
+        finalEmail = customerInfo[0].email;
+        finalPhone = customerInfo[0].phone;
+        finalName = finalName || customerInfo[0].fullname;
+        console.log('✅ Customer info from database:', {
+          email: finalEmail,
+          phone: finalPhone,
+          name: finalName
+        });
+      }
+
       const updateQuery = `
         UPDATE tblbooking
         SET customerkey = :customerkey,
@@ -234,13 +258,13 @@ exports._booking_save = async (req, res) => {
           customerkey: resolvedCustomerKey,
           servicekey,
           staffkey,
-          customeremail,
-          customerphone,
+          customeremail: finalEmail,
+          customerphone: finalPhone,
           datetime: bookingStart,
           bookingstart: bookingStart,
           bookingend: bookingEndStr,
           note,
-          customername,
+          customername: finalName,
           staffname,
           servicename,
           userkey,
@@ -250,31 +274,40 @@ exports._booking_save = async (req, res) => {
 
       newBookingKey = Number(bookingkey);
 
-      // Generate token for notifications
+      console.log('✅ Booking updated, preparing notifications...');
+
+      // ✅ Generate customer token for modified booking
       const customerToken = jwt.sign(
         {
           customerkey: resolvedCustomerKey,
-          email: customeremail,
-          phone: customerphone,
-          name: customername,
-          type: 'customer'
+          email: finalEmail,
+          phone: finalPhone,
+          name: finalName,
+          type: 'web_customer'
         },
         config.secret,
         { expiresIn: 86400 * 30 }
       );
 
-      // 📧 Send modification notifications
-      if (customeremail || customerphone) {
+      // ✅ Send modification notifications using customer info from database
+      if (finalEmail || finalPhone) {
+        console.log('📬 Sending modification notifications to:', {
+          email: finalEmail,
+          phone: finalPhone
+        });
+
         const notificationData = {
           bookingkey: newBookingKey,
-          customername: customername || 'Guest',
-          customeremail,
-          customerphone,
+          customername: finalName || 'Guest',
+          customeremail: finalEmail,
+          customerphone: finalPhone,
           datetime: formatDatetimeForDisplay(bookingStart),
           servicename: servicename || 'Service',
           staffname: staffname || 'Staff',
           token: customerToken
         };
+
+        console.log('📦 Notification data:', notificationData);
 
         Promise.all([
           notifications.sendBookingModificationEmail(notificationData),
@@ -284,7 +317,10 @@ exports._booking_save = async (req, res) => {
         }).catch(err => {
           console.error('⚠️ Modification notification error (non-critical):', err);
         });
+      } else {
+        console.log('⚠️ No email or phone found in customer record');
       }
+
     } else {
       // INSERT new booking
       console.log('✨ Creating new booking with customerkey:', resolvedCustomerKey);
@@ -331,49 +367,28 @@ exports._booking_save = async (req, res) => {
       );
 
       console.log('✅ Incremented numbooking for customer:', resolvedCustomerKey);
-
-      // Generate customer token
-      const customerToken = jwt.sign(
-        {
-          customerkey: resolvedCustomerKey,
-          email: customeremail,
-          phone: customerphone,
-          name: customername,
-          type: 'customer'
-        },
-        config.secret,
-        { expiresIn: 86400 * 30 }
-      );
-
-      // 📧 Send confirmation notifications (only for new bookings)
-      if (customeremail || customerphone) {
-        const notificationData = {
-          bookingkey: newBookingKey,
-          customername: customername || 'Guest',
-          customeremail,
-          customerphone,
-          datetime: formatDatetimeForDisplay(bookingStart),
-          servicename: servicename || 'Service',
-          staffname: staffname || 'Staff',
-          token: customerToken
-        };
-
-        Promise.all([
-          notifications.sendBookingEmail(notificationData),
-          notifications.sendBookingSMS(notificationData)
-        ]).then(results => {
-          console.log('📬 Notification results:', results);
-        }).catch(err => {
-          console.error('⚠️ Notification error (non-critical):', err);
-        });
-      }
     }
+
+    // Generate customer token (for response)
+    const customerToken = jwt.sign(
+      {
+        customerkey: resolvedCustomerKey,
+        email: customeremail,
+        phone: customerphone,
+        name: customername,
+        type: 'web_customer'
+      },
+      config.secret,
+      { expiresIn: 86400 * 30 }
+    );
 
     return res.status(isNewBooking ? 201 : 200).json({
       message: isNewBooking ? "Booking added successfully" : "Booking updated successfully",
       bookingkey: newBookingKey,
-      customerkey: resolvedCustomerKey
+      customerkey: resolvedCustomerKey,
+      token: customerToken
     });
+
   } catch (err) {
     console.error("Database Save Error:", err);
     res.status(500).json({ error: "Internal Server Error", details: err.message });
@@ -1132,6 +1147,30 @@ exports._bookingweb_save = async (req, res) => {
       // UPDATE existing booking
       console.log('📝 Updating booking:', bookingkey, 'with customerkey:', resolvedCustomerKey);
 
+      // ✅ Fetch customer email and phone from tblcustomer
+      const customerInfo = await db.sequelize.query(
+        "SELECT email, phone, fullname FROM tblcustomer WHERE pkey = :customerkey LIMIT 1",
+        {
+          replacements: { customerkey: resolvedCustomerKey },
+          type: db.sequelize.QueryTypes.SELECT
+        }
+      );
+
+      let finalEmail = customeremail;
+      let finalPhone = customerphone;
+      let finalName = customername;
+
+      if (customerInfo && customerInfo.length > 0) {
+        finalEmail = customerInfo[0].email;
+        finalPhone = customerInfo[0].phone;
+        finalName = finalName || customerInfo[0].fullname;
+        console.log('✅ Customer info from database:', {
+          email: finalEmail,
+          phone: finalPhone,
+          name: finalName
+        });
+      }
+
       const updateQuery = `
         UPDATE tblbooking
         SET customerkey = :customerkey,
@@ -1158,13 +1197,13 @@ exports._bookingweb_save = async (req, res) => {
           customerkey: resolvedCustomerKey,
           servicekey,
           staffkey,
-          customeremail,
-          customerphone,
+          customeremail: finalEmail,
+          customerphone: finalPhone,
           datetime: bookingStart,
           bookingstart: bookingStart,
           bookingend: bookingEndStr,
           note,
-          customername,
+          customername: finalName,
           staffname,
           servicename,
           userkey,
@@ -1173,6 +1212,54 @@ exports._bookingweb_save = async (req, res) => {
       });
 
       newBookingKey = Number(bookingkey);
+
+      console.log('✅ Booking updated, preparing notifications...');
+
+      // ✅ Generate customer token for modified booking
+      const customerToken = jwt.sign(
+        {
+          customerkey: resolvedCustomerKey,
+          email: finalEmail,
+          phone: finalPhone,
+          name: finalName,
+          type: 'web_customer'
+        },
+        config.secret,
+        { expiresIn: 86400 * 30 }
+      );
+
+      // ✅ Send modification notifications using customer info from database
+      if (finalEmail || finalPhone) {
+        console.log('📬 Sending modification notifications to:', {
+          email: finalEmail,
+          phone: finalPhone
+        });
+
+        const notificationData = {
+          bookingkey: newBookingKey,
+          customername: finalName || 'Guest',
+          customeremail: finalEmail,
+          customerphone: finalPhone,
+          datetime: formatDatetimeForDisplay(bookingStart),
+          servicename: servicename || 'Service',
+          staffname: staffname || 'Staff',
+          token: customerToken
+        };
+
+        console.log('📦 Notification data:', notificationData);
+
+        Promise.all([
+          notifications.sendBookingModificationEmail(notificationData),
+          notifications.sendBookingModificationSMS(notificationData)
+        ]).then(results => {
+          console.log('📬 Modification notification results:', results);
+        }).catch(err => {
+          console.error('⚠️ Modification notification error (non-critical):', err);
+        });
+      } else {
+        console.log('⚠️ No email or phone found in customer record');
+      }
+
     } else {
       // INSERT new booking
       console.log('✨ Creating new booking with customerkey:', resolvedCustomerKey);
@@ -1221,7 +1308,7 @@ exports._bookingweb_save = async (req, res) => {
       console.log('✅ Incremented numbooking for customer:', resolvedCustomerKey);
     }
 
-    // Generate customer token
+    // Generate customer token (for response)
     const customerToken = jwt.sign(
       {
         customerkey: resolvedCustomerKey,
@@ -1234,31 +1321,8 @@ exports._bookingweb_save = async (req, res) => {
       { expiresIn: 86400 * 30 }
     );
 
-    // 📧 Send confirmation notifications (only for new bookings)
-    if (isNewBooking && (customeremail || customerphone)) {
-      const notificationData = {
-        bookingkey: newBookingKey,
-        customername: customername || 'Guest',
-        customeremail,
-        customerphone,
-        datetime: formatDatetimeForDisplay(bookingStart),
-        servicename: servicename || 'Service',
-        staffname: staffname || 'Staff',
-        token: customerToken  // ✅ Add token here
-      };
-
-      Promise.all([
-        notifications.sendBookingEmail(notificationData),
-        notifications.sendBookingSMS(notificationData)
-      ]).then(results => {
-        console.log('📬 Notification results:', results);
-      }).catch(err => {
-        console.error('⚠️ Notification error (non-critical):', err);
-      });
-    }
-
-    return res.status(201).json({
-      message: "Booking added successfully",
+    return res.status(isNewBooking ? 201 : 200).json({
+      message: isNewBooking ? "Booking added successfully" : "Booking updated successfully",
       bookingkey: newBookingKey,
       customerkey: resolvedCustomerKey,
       token: customerToken
@@ -1268,6 +1332,275 @@ exports._bookingweb_save = async (req, res) => {
     console.error("Database Save Error:", err);
     res.status(500).json({ error: "Internal Server Error", details: err.message });
   }
+};
+
+// Email cancel endpoint - cancels booking directly via email link
+// GET /api/booking/email-cancel?bookingkey=123&token=xyz
+exports._email_cancel_booking = async (req, res) => {
+  try {
+    const { bookingkey, token } = req.query;
+
+    console.log('🚫 Email cancel request:', { bookingkey });
+
+    if (!bookingkey || !token) {
+      return res.status(400).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Error - Missing Information</title>
+          <style>
+            body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+            .error { color: #F44336; font-size: 24px; margin: 20px 0; }
+            .message { color: #666; margin: 20px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="error">❌ Error</div>
+          <div class="message">Missing booking information. Please use the link from your email.</div>
+        </body>
+        </html>
+      `);
+    }
+
+    // Verify token
+    let decoded;
+    try {
+      decoded = jwt.verify(token, config.secret);
+      console.log('✅ Token verified:', decoded);
+    } catch (verifyErr) {
+      console.error('❌ Token verification failed:', verifyErr.message);
+      return res.status(401).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Error - Invalid Link</title>
+          <style>
+            body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+            .error { color: #F44336; font-size: 24px; margin: 20px 0; }
+            .message { color: #666; margin: 20px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="error">❌ Invalid or Expired Link</div>
+          <div class="message">This cancellation link is no longer valid. Please contact us directly.</div>
+        </body>
+        </html>
+      `);
+    }
+
+    // Get booking details before cancellation
+    const bookingCheck = await db.sequelize.query(
+      `SELECT pkey, customerkey, datetime, bookingstart, customername, customeremail, 
+              customerphone, servicename, staffname
+       FROM tblbooking 
+       WHERE pkey = :bookingkey 
+         AND customerkey = :customerkey 
+         AND dateinactivated IS NULL`,
+      {
+        replacements: {
+          bookingkey: Number(bookingkey),
+          customerkey: decoded.customerkey
+        },
+        type: db.sequelize.QueryTypes.SELECT
+      }
+    );
+
+    if (!bookingCheck || bookingCheck.length === 0) {
+      return res.status(404).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Booking Not Found</title>
+          <style>
+            body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+            .error { color: #FF9800; font-size: 24px; margin: 20px 0; }
+            .message { color: #666; margin: 20px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="error">⚠️ Booking Not Found</div>
+          <div class="message">This booking has already been cancelled or does not exist.</div>
+        </body>
+        </html>
+      `);
+    }
+
+    const booking = bookingCheck[0];
+
+    // Check if booking is in the past
+    const bookingTime = new Date(booking.bookingstart || booking.datetime);
+    if (bookingTime < new Date()) {
+      return res.status(400).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Cannot Cancel</title>
+          <style>
+            body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+            .error { color: #F44336; font-size: 24px; margin: 20px 0; }
+            .message { color: #666; margin: 20px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="error">❌ Cannot Cancel</div>
+          <div class="message">This booking is in the past and cannot be cancelled.</div>
+        </body>
+        </html>
+      `);
+    }
+
+    // Cancel the booking
+    const cancelQuery = `
+      UPDATE tblbooking
+      SET dateinactivated = NOW()
+      WHERE pkey = :bookingkey
+    `;
+
+    await db.sequelize.query(cancelQuery, {
+      replacements: { bookingkey: Number(bookingkey) },
+      type: db.sequelize.QueryTypes.UPDATE,
+    });
+
+    console.log('✅ Booking cancelled via email:', bookingkey);
+
+    // Get salon info for success page
+    const salonInfo = await db.sequelize.query(
+      `SELECT name, phone, email FROM tblsalon WHERE pkey = :salonkey AND dateinactivated IS NULL LIMIT 1`,
+      {
+        replacements: { salonkey: process.env.SALON_KEY || 1 },
+        type: db.sequelize.QueryTypes.SELECT
+      }
+    );
+
+    const salon = salonInfo && salonInfo.length > 0 ? salonInfo[0] : { name: 'Salon', phone: '', email: '' };
+    const bookAgainUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+    // Return success page
+    return res.status(200).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Booking Cancelled</title>
+        <style>
+          body { 
+            font-family: Arial, sans-serif; 
+            max-width: 600px; 
+            margin: 50px auto; 
+            padding: 20px; 
+            text-align: center;
+            background-color: #f5f5f5;
+          }
+          .container {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+          }
+          .success { color: #4CAF50; font-size: 48px; margin: 20px 0; }
+          .title { color: #333; font-size: 24px; margin: 20px 0; font-weight: bold; }
+          .message { color: #666; margin: 20px 0; line-height: 1.6; }
+          .details {
+            background-color: #FFEBEE;
+            padding: 20px;
+            border-radius: 5px;
+            margin: 20px 0;
+            border-left: 4px solid #F44336;
+            text-align: left;
+          }
+          .details p { margin: 10px 0; color: #333; }
+          .button {
+            display: inline-block;
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px 30px;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 20px 10px;
+            font-weight: bold;
+          }
+          .contact {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+            color: #666;
+            font-size: 14px;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="success">✅</div>
+          <div class="title">Booking Cancelled Successfully</div>
+          <div class="message">Your booking has been cancelled.</div>
+          
+          <div class="details">
+            <p><strong>Booking ID:</strong> #${bookingkey}</p>
+            <p><strong>Service:</strong> ${booking.servicename || 'N/A'}</p>
+            <p><strong>Staff:</strong> ${booking.staffname || 'N/A'}</p>
+            <p><strong>Date & Time:</strong> ${formatDatetimeForDisplay(booking.bookingstart || booking.datetime)}</p>
+          </div>
+          
+          <div class="message">
+            We're sorry to see you cancel. If you'd like to book again, we'd be happy to help you.
+          </div>
+          
+          <a href="${bookAgainUrl}" class="button">📅 Book Again</a>
+          
+          <div class="contact">
+            <strong>${salon.name}</strong><br>
+            ${salon.phone ? `📞 ${salon.phone}<br>` : ''}
+            ${salon.email ? `📧 ${salon.email}` : ''}
+          </div>
+        </div>
+      </body>
+      </html>
+    `);
+
+  } catch (err) {
+    console.error("❌ Email cancel booking error:", err);
+    return res.status(500).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Error</title>
+        <style>
+          body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+          .error { color: #F44336; font-size: 24px; margin: 20px 0; }
+          .message { color: #666; margin: 20px 0; }
+        </style>
+      </head>
+      <body>
+        <div class="error">❌ Error</div>
+        <div class="message">An error occurred while cancelling your booking. Please try again or contact us.</div>
+      </body>
+      </html>
+    `);
+  }
+};
+
+// Email redirect handlers for modify and view
+exports._email_redirect_modify = async (req, res) => {
+  const { bookingkey, token } = req.query;
+  const flutterUrl = process.env.FLUTTER_URL || 'http://localhost:3000';
+  res.redirect(`${flutterUrl}/booking/modify?bookingkey=${bookingkey}&token=${encodeURIComponent(token)}`);
+};
+
+exports._email_redirect_view = async (req, res) => {
+  const { bookingkey, token } = req.query;
+  const flutterUrl = process.env.FLUTTER_URL || 'http://localhost:3000';
+  res.redirect(`${flutterUrl}/booking/view?bookingkey=${bookingkey}&token=${encodeURIComponent(token)}`);
 };
 
 

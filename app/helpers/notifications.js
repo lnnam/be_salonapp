@@ -95,12 +95,17 @@ async function getSalonInfo() {
 }
 
 /**
- * Generate action buttons HTML
+ * Generate action buttons HTML using backend URLs
  */
 function getActionButtons(bookingkey, token, showCancel = true, showChange = true) {
-    const cancelUrl = `${FRONTEND_URL}/booking/cancel?bookingkey=${bookingkey}&token=${encodeURIComponent(token)}`;
-    const changeUrl = `${FRONTEND_URL}/booking/modify?bookingkey=${bookingkey}&token=${encodeURIComponent(token)}`;
-    const viewUrl = `${FRONTEND_URL}/booking/view?bookingkey=${bookingkey}&token=${encodeURIComponent(token)}`;
+    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8080';
+
+    // ✅ Cancel button goes directly to backend (no confirmation needed)
+    const cancelUrl = `${backendUrl}/api/booking/email-cancel?bookingkey=${bookingkey}&token=${encodeURIComponent(token)}`;
+
+    // Change and view redirect to Flutter app
+    const changeUrl = `${backendUrl}/api/booking/email-modify?bookingkey=${bookingkey}&token=${encodeURIComponent(token)}`;
+    const viewUrl = `${backendUrl}/api/booking/email-view?bookingkey=${bookingkey}&token=${encodeURIComponent(token)}`;
 
     let buttonsHtml = '<div style="text-align: center; margin: 30px 0;">';
 
