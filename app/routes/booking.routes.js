@@ -57,6 +57,9 @@ module.exports = function (app) {
   app.get("/api/booking/email-cancel", controller._email_cancel_booking);
   app.get("/api/booking/email-modify", controller._email_redirect_modify);
   app.get("/api/booking/email-view", controller._email_redirect_view);
+
+  // Customer management endpoints (public)
+  app.post("/api/booking/customer/add", controller._add_customer);
 };
 
 

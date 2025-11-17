@@ -283,7 +283,7 @@ exports._booking_save = async (req, res) => {
           email: finalEmail,
           phone: finalPhone,
           name: finalName,
-          type: 'web_customer'
+          type: 'customer'
         },
         config.secret,
         { expiresIn: 86400 * 30 }
@@ -329,11 +329,11 @@ exports._booking_save = async (req, res) => {
         INSERT INTO tblbooking 
         (customerkey, servicekey, staffkey, date, datetime, bookingstart, bookingend, 
          customeremail, customerphone,
-         dateactivated, note, customername, staffname, servicename, userkey)
+         dateactivated, note, customername, staffname, servicename, userkey, createdby)
         VALUES 
         (:customerkey, :servicekey, :staffkey, CURDATE(), NOW(), :bookingstart, :bookingend, 
          :customeremail, :customerphone,
-         NOW(), :note, :customername, :staffname, :servicename, :userkey)
+         NOW(), :note, :customername, :staffname, :servicename, :userkey, 'salon')
       `;
 
       const objstore = await db.sequelize.query(insertQuery, {
@@ -367,6 +367,75 @@ exports._booking_save = async (req, res) => {
       );
 
       console.log('✅ Incremented numbooking for customer:', resolvedCustomerKey);
+
+      // ✅ Fetch customer info from tblcustomer for email notifications
+      const customerInfo = await db.sequelize.query(
+        "SELECT email, phone, fullname FROM tblcustomer WHERE pkey = :customerkey LIMIT 1",
+        {
+          replacements: { customerkey: resolvedCustomerKey },
+          type: db.sequelize.QueryTypes.SELECT
+        }
+      );
+
+      let finalEmail = customeremail;
+      let finalPhone = customerphone;
+      let finalName = customername;
+
+      if (customerInfo && customerInfo.length > 0) {
+        finalEmail = finalEmail || customerInfo[0].email;
+        finalPhone = finalPhone || customerInfo[0].phone;
+        finalName = finalName || customerInfo[0].fullname;
+        console.log('✅ Customer info from database for new booking:', {
+          email: finalEmail,
+          phone: finalPhone,
+          name: finalName
+        });
+      }
+
+      // ✅ Generate customer token for new booking
+      const customerToken = jwt.sign(
+        {
+          customerkey: resolvedCustomerKey,
+          email: finalEmail,
+          phone: finalPhone,
+          name: finalName,
+          type: 'customer'
+        },
+        config.secret,
+        { expiresIn: 86400 * 30 }
+      );
+
+      // ✅ Send confirmation notifications (only for new bookings)
+      if (finalEmail || finalPhone) {
+        console.log('📬 Sending confirmation notifications to:', {
+          email: finalEmail,
+          phone: finalPhone
+        });
+
+        const notificationData = {
+          bookingkey: newBookingKey,
+          customername: finalName || 'Guest',
+          customeremail: finalEmail,
+          customerphone: finalPhone,
+          datetime: formatDatetimeForDisplay(bookingStart),
+          servicename: servicename || 'Service',
+          staffname: staffname || 'Staff',
+          token: customerToken
+        };
+
+        console.log('📦 Notification data:', notificationData);
+
+        Promise.all([
+          notifications.sendBookingEmail(notificationData),
+          notifications.sendBookingSMS(notificationData)
+        ]).then(results => {
+          console.log('📬 Confirmation notification results:', results);
+        }).catch(err => {
+          console.error('⚠️ Confirmation notification error (non-critical):', err);
+        });
+      } else {
+        console.log('⚠️ No email or phone found in customer record for new booking');
+      }
     }
 
     // Generate customer token (for response)
@@ -376,7 +445,7 @@ exports._booking_save = async (req, res) => {
         email: customeremail,
         phone: customerphone,
         name: customername,
-        type: 'web_customer'
+        type: 'customer'
       },
       config.secret,
       { expiresIn: 86400 * 30 }
@@ -928,6 +997,7 @@ exports._customer_register = async (req, res) => {
     // Normalize inputs
     const normalizedEmail = String(email).trim().toLowerCase();
     const normalizedPhone = String(phone).trim();
+    const normalizedBirthday = birthday ? new Date(birthday) : null;
 
     // Hash password
     const hashedPassword = bcrypt.hashSync(password, 8);
@@ -993,7 +1063,7 @@ exports._customer_register = async (req, res) => {
         message: "Customer updated successfully",
         token: token,
         customer: {
-          pkey: customer.pkey,
+          pkey: customer.p.pkey,
           fullname: fullname,
           email: normalizedEmail,
           phone: normalizedPhone,
@@ -1246,7 +1316,7 @@ exports._bookingweb_save = async (req, res) => {
           email: finalEmail,
           phone: finalPhone,
           name: finalName,
-          type: 'web_customer'
+          type: 'customer'
         },
         config.secret,
         { expiresIn: 86400 * 30 }
@@ -1292,11 +1362,11 @@ exports._bookingweb_save = async (req, res) => {
         INSERT INTO tblbooking 
         (customerkey, servicekey, staffkey, date, datetime, bookingstart, bookingend, 
          customeremail, customerphone,
-         dateactivated, note, customername, staffname, servicename, userkey)
+         dateactivated, note, customername, staffname, servicename, userkey, createdby)
         VALUES 
         (:customerkey, :servicekey, :staffkey, CURDATE(), NOW(), :bookingstart, :bookingend, 
          :customeremail, :customerphone,
-         NOW(), :note, :customername, :staffname, :servicename, :userkey)
+         NOW(), :note, :customername, :staffname, :servicename, :userkey, 'customer')
       `;
 
       const objstore = await db.sequelize.query(insertQuery, {
@@ -1331,33 +1401,49 @@ exports._bookingweb_save = async (req, res) => {
 
       console.log('✅ Incremented numbooking for customer:', resolvedCustomerKey);
 
-      // ✅ Send creation notifications for new bookings
-      try {
-        const customerInfo = await db.sequelize.query(
-          "SELECT email, phone, fullname FROM tblcustomer WHERE pkey = :customerkey LIMIT 1",
-          { replacements: { customerkey: resolvedCustomerKey }, type: db.sequelize.QueryTypes.SELECT }
-        );
-
-        let finalEmail = customeremail;
-        let finalPhone = customerphone;
-        let finalName = customername;
-        if (customerInfo && customerInfo.length > 0) {
-          finalEmail = finalEmail || customerInfo[0].email;
-          finalPhone = finalPhone || customerInfo[0].phone;
-          finalName = finalName || customerInfo[0].fullname;
+      // ✅ Fetch customer info from tblcustomer for email notifications
+      const customerInfo = await db.sequelize.query(
+        "SELECT email, phone, fullname FROM tblcustomer WHERE pkey = :customerkey LIMIT 1",
+        {
+          replacements: { customerkey: resolvedCustomerKey },
+          type: db.sequelize.QueryTypes.SELECT
         }
+      );
 
-        const creationToken = jwt.sign(
-          {
-            customerkey: resolvedCustomerKey,
-            email: finalEmail,
-            phone: finalPhone,
-            name: finalName,
-            type: 'web_customer'
-          },
-          config.secret,
-          { expiresIn: 86400 * 30 }
-        );
+      let finalEmail = customeremail;
+      let finalPhone = customerphone;
+      let finalName = customername;
+
+      if (customerInfo && customerInfo.length > 0) {
+        finalEmail = finalEmail || customerInfo[0].email;
+        finalPhone = finalPhone || customerInfo[0].phone;
+        finalName = finalName || customerInfo[0].fullname;
+        console.log('✅ Customer info from database for new booking:', {
+          email: finalEmail,
+          phone: finalPhone,
+          name: finalName
+        });
+      }
+
+      // ✅ Generate customer token for new booking
+      const customerToken = jwt.sign(
+        {
+          customerkey: resolvedCustomerKey,
+          email: finalEmail,
+          phone: finalPhone,
+          name: finalName,
+          type: 'customer'
+        },
+        config.secret,
+        { expiresIn: 86400 * 30 }
+      );
+
+      // ✅ Send confirmation notifications (only for new bookings)
+      if (finalEmail || finalPhone) {
+        console.log('📬 Sending confirmation notifications to:', {
+          email: finalEmail,
+          phone: finalPhone
+        });
 
         const notificationData = {
           bookingkey: newBookingKey,
@@ -1367,25 +1453,21 @@ exports._bookingweb_save = async (req, res) => {
           datetime: formatDatetimeForDisplay(bookingStart),
           servicename: servicename || 'Service',
           staffname: staffname || 'Staff',
-          token: creationToken
+          token: customerToken
         };
 
-        console.log('📬 Sending new booking notifications to:', { email: finalEmail, phone: finalPhone });
+        console.log('📦 Notification data:', notificationData);
 
-        if (finalEmail || finalPhone) {
-          Promise.all([
-            notifications.sendBookingEmail(notificationData),
-            notifications.sendBookingSMS(notificationData)
-          ]).then(results => {
-            console.log('📬 New booking notification results:', results);
-          }).catch(err => {
-            console.error('⚠️ New booking notification error (non-critical):', err);
-          });
-        } else {
-          console.log('⚠️ No email or phone available for new booking notifications');
-        }
-      } catch (notifyErr) {
-        console.error('❌ Error preparing new booking notifications:', notifyErr);
+        Promise.all([
+          notifications.sendBookingEmail(notificationData),
+          notifications.sendBookingSMS(notificationData)
+        ]).then(results => {
+          console.log('📬 Confirmation notification results:', results);
+        }).catch(err => {
+          console.error('⚠️ Confirmation notification error (non-critical):', err);
+        });
+      } else {
+        console.log('⚠️ No email or phone found in customer record for new booking');
       }
     }
 
@@ -1396,7 +1478,7 @@ exports._bookingweb_save = async (req, res) => {
         email: customeremail,
         phone: customerphone,
         name: customername,
-        type: 'web_customer'
+        type: 'customer'
       },
       config.secret,
       { expiresIn: 86400 * 30 }
@@ -1683,6 +1765,110 @@ exports._email_redirect_view = async (req, res) => {
   const { bookingkey, token } = req.query;
   const flutterUrl = process.env.FLUTTER_URL || 'http://localhost:3000';
   res.redirect(`${flutterUrl}/booking/view?bookingkey=${bookingkey}&token=${encodeURIComponent(token)}`);
+};
+
+// Add new customer (public endpoint)
+// POST /api/booking/customer/add
+// Body: { fullname, email, phone, dob }
+exports._add_customer = async (req, res) => {
+  try {
+    console.log('👤 Add customer request:', req.body);
+
+    const { fullname, email, phone, dob } = req.body;
+
+    // Validate required fields
+    if (!fullname) {
+      return res.status(400).json({
+        error: "Missing required field: fullname"
+      });
+    }
+
+    // Normalize inputs
+    const normalizedEmail = email ? String(email).trim().toLowerCase() : null;
+    const normalizedPhone = phone ? String(phone).trim() : null;
+    const normalizedDob = dob || null;
+
+    // Check if customer already exists (by email or phone)
+    if (normalizedEmail || normalizedPhone) {
+      let checkQuery = "SELECT pkey, fullname, email, phone FROM tblcustomer WHERE dateinactivated IS NULL";
+      const replacements = {};
+      const conditions = [];
+
+      if (normalizedEmail) {
+        conditions.push("LOWER(email) = :email");
+        replacements.email = normalizedEmail;
+      }
+
+      if (normalizedPhone) {
+        conditions.push("phone = :phone");
+        replacements.phone = normalizedPhone;
+      }
+
+      if (conditions.length > 0) {
+        checkQuery += " AND (" + conditions.join(" OR ") + ")";
+      }
+
+      checkQuery += " LIMIT 1";
+
+      const existingCustomer = await db.sequelize.query(checkQuery, {
+        replacements,
+        type: db.sequelize.QueryTypes.SELECT
+      });
+
+      if (existingCustomer && existingCustomer.length > 0) {
+        console.log('⚠️ Customer already exists:', existingCustomer[0].pkey);
+        return res.status(409).json({
+          error: "Customer already exists",
+          customerkey: existingCustomer[0].pkey,
+          customer: existingCustomer[0]
+        });
+      }
+    }
+
+    // Insert new customer
+    const insertQuery = `
+      INSERT INTO tblcustomer 
+      (fullname, email, phone, birthday, type, dateactivated, numbooking, createdby)
+      VALUES 
+      (:fullname, :email, :phone, :birthday, 'customer', NOW(), 0, 'salon')
+    `;
+
+    const result = await db.sequelize.query(insertQuery, {
+      replacements: {
+        fullname: fullname,
+        email: normalizedEmail,
+        phone: normalizedPhone,
+        birthday: normalizedDob
+      },
+      type: db.sequelize.QueryTypes.INSERT
+    });
+
+    const newCustomerKey = result[0];
+
+    console.log('✅ Customer created:', newCustomerKey);
+
+    // Fetch the newly created customer
+    const newCustomer = await db.sequelize.query(
+      "SELECT pkey, fullname, email, phone, birthday, type, dateactivated FROM tblcustomer WHERE pkey = :customerkey",
+      {
+        replacements: { customerkey: newCustomerKey },
+        type: db.sequelize.QueryTypes.SELECT
+      }
+    );
+
+    return res.status(201).json({
+      message: "Customer added successfully",
+      customerkey: newCustomerKey,
+      customer: newCustomer[0]
+    });
+
+  } catch (err) {
+    console.error("❌ Add customer error:", err);
+    res.status(500).json({
+      error: "Internal Server Error",
+      details: err.message
+    });
+  }
 };
 
 
