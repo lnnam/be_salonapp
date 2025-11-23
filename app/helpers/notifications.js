@@ -508,3 +508,56 @@ exports.sendBookingCancellationSMS = async (bookingData) => {
         return { success: false, error: error.message };
     }
 };
+
+/**
+ * Send a password reset email containing a temporary password
+ * bookingData: { customeremail, customername, password }
+ */
+exports.sendPasswordResetEmail = async (data) => {
+    if (!EMAIL_ENABLED) {
+        console.log('⚠️ Email notifications are disabled - cannot send password reset');
+        return { success: false, reason: 'Email notifications disabled' };
+    }
+
+    if (!emailTransporter) {
+        console.log('⚠️ Email transporter not initialized');
+        return { success: false, reason: 'Email transporter not configured' };
+    }
+
+    try {
+        const { customeremail, customername, password } = data;
+        if (!customeremail) {
+            console.log('⚠️ No email provided, skipping password reset email');
+            return { success: false, reason: 'No email provided' };
+        }
+
+        const salon = await getSalonInfo();
+
+        const mailOptions = {
+            from: process.env.SMTP_FROM || `"${salon.name}" <${salon.email}>`,
+            to: customeremail,
+            subject: `Password Reset - ${salon.name}`,
+            html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #333;">Password Reset</h2>
+          <p>Dear ${customername || 'Customer'},</p>
+          <p>A temporary password has been generated for your account. Use it to sign in and then update your password in your profile.</p>
+          <div style="background:#f5f5f5;padding:16px;border-radius:6px;margin:16px 0;text-align:center;">
+            <strong style="font-size:18px;">${password}</strong>
+          </div>
+          <p style="color:#666;">For security, please change this password after logging in.</p>
+          <p>Thank you,<br/>${salon.name}</p>
+          <hr style="margin-top:20px;border:none;border-top:1px solid #eee;"/>
+          <p style="font-size:12px;color:#999;">This is an automated email. If you did not request this, please contact us immediately.</p>
+        </div>
+      `
+        };
+
+        const info = await emailTransporter.sendMail(mailOptions);
+        console.log('✅ Password reset email sent:', info.messageId);
+        return { success: true, messageId: info.messageId };
+    } catch (err) {
+        console.error('❌ Password reset email error:', err);
+        return { success: false, error: err.message };
+    }
+};

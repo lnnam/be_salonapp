@@ -124,8 +124,11 @@ exports._booking_save = async (req, res) => {
 
     // ✅ Only resolve/create customer for NEW bookings
     if (!isUpdating && !resolvedCustomerKey) {
-      const phone = customerphone ? String(customerphone).trim() : null;
-      const email = customeremail ? String(customeremail).trim().toLowerCase() : null;
+      // Accept either snake_case (`customerphone`) or camelCase (`customerPhone`) from clients
+      const phoneRaw = (typeof customerphone !== 'undefined' ? customerphone : req.body.customerPhone);
+      const emailRaw = (typeof customeremail !== 'undefined' ? customeremail : req.body.customerEmail);
+      const phone = phoneRaw ? String(phoneRaw).trim() : null;
+      const email = emailRaw ? String(emailRaw).trim().toLowerCase() : null;
 
       if (phone) {
         const foundByPhone = await db.sequelize.query(
@@ -144,6 +147,18 @@ exports._booking_save = async (req, res) => {
         );
         if (Array.isArray(foundByEmail) && foundByEmail.length > 0) {
           resolvedCustomerKey = foundByEmail[0].pkey;
+          // Email exists — reuse customer record and update phone if provided instead of inserting duplicate
+          try {
+            if (phone) {
+              await db.sequelize.query(
+                "UPDATE tblcustomer SET phone = :phone WHERE pkey = :pkey",
+                { replacements: { phone, pkey: resolvedCustomerKey }, type: db.sequelize.QueryTypes.UPDATE }
+              );
+              console.log('✅ Updated existing customer phone for pkey:', resolvedCustomerKey);
+            }
+          } catch (e) {
+            console.warn('⚠️ Could not update phone for existing customer pkey=', resolvedCustomerKey, e && e.message);
+          }
         }
       }
 
@@ -1128,6 +1143,62 @@ exports._customer_register = async (req, res) => {
   }
 };
 
+// Customer reset password (public)
+// POST /api/booking/customer/reset-password
+// Body: { email }
+exports._customer_reset_password = async (req, res) => {
+  try {
+    const emailInput = req.body.email || req.body.emailAddress || req.body.customerEmail;
+    if (!emailInput) {
+      return res.status(400).json({ error: 'Missing email' });
+    }
+
+    const email = String(emailInput).trim().toLowerCase();
+
+    // Find customer by email
+    const rows = await db.sequelize.query(
+      "SELECT pkey, fullname, email FROM tblcustomer WHERE LOWER(email) = :email AND dateinactivated IS NULL LIMIT 1",
+      { replacements: { email }, type: db.sequelize.QueryTypes.SELECT }
+    );
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'No customer account found for that email' });
+    }
+
+    const customer = rows[0];
+
+    // Generate a temporary password (8 characters)
+    const tempPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).charAt(2);
+    const hashed = bcrypt.hashSync(tempPassword, 8);
+
+    // Update customer's password in DB
+    await db.sequelize.query(
+      "UPDATE tblcustomer SET password = :password, dateactivated = COALESCE(dateactivated, NOW()) WHERE pkey = :pkey",
+      { replacements: { password: hashed, pkey: customer.pkey }, type: db.sequelize.QueryTypes.UPDATE }
+    );
+
+    // Send email with temporary password
+    try {
+      const emailResult = await notifications.sendPasswordResetEmail({
+        customeremail: customer.email,
+        customername: customer.fullname || '',
+        password: tempPassword
+      });
+
+      if (!emailResult || emailResult.success === false) {
+        console.warn('⚠️ Password reset: email may not have been sent', emailResult);
+      }
+    } catch (e) {
+      console.error('❌ Error sending password reset email:', e);
+    }
+
+    return res.status(200).json({ message: 'Temporary password generated and emailed if the address exists' });
+  } catch (err) {
+    console.error('❌ Reset password error:', err);
+    return res.status(500).json({ error: 'Internal Server Error', details: err.message });
+  }
+};
+
 exports._bookingweb_save = async (req, res) => {
   console.log("Received booking save request:", req.body);
 
@@ -1177,6 +1248,18 @@ exports._bookingweb_save = async (req, res) => {
         );
         if (Array.isArray(foundByEmail) && foundByEmail.length > 0) {
           resolvedCustomerKey = foundByEmail[0].pkey;
+          // Email exists — reuse customer record and update phone if provided instead of inserting duplicate
+          try {
+            if (phone) {
+              await db.sequelize.query(
+                "UPDATE tblcustomer SET phone = :phone WHERE pkey = :pkey",
+                { replacements: { phone, pkey: resolvedCustomerKey }, type: db.sequelize.QueryTypes.UPDATE }
+              );
+              console.log('✅ Updated existing customer phone for pkey:', resolvedCustomerKey);
+            }
+          } catch (e) {
+            console.warn('⚠️ Could not update phone for existing customer pkey=', resolvedCustomerKey, e && e.message);
+          }
         }
       }
 
