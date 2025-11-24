@@ -419,7 +419,6 @@ exports._booking_save = async (req, res) => {
         config.secret,
         { expiresIn: 86400 * 30 }
       );
-
       // ✅ Send confirmation notifications (only for new bookings)
       if (finalEmail || finalPhone) {
         console.log('📬 Sending confirmation notifications to:', {
@@ -453,6 +452,20 @@ exports._booking_save = async (req, res) => {
       }
     }
 
+    // Fetch booking status so we can report pending/confirmed to the client
+    let bookingStatus = null;
+    try {
+      const statusRows = await db.sequelize.query(
+        "SELECT status FROM tblbooking WHERE pkey = :pkey LIMIT 1",
+        { replacements: { pkey: Number(newBookingKey) }, type: db.sequelize.QueryTypes.SELECT }
+      );
+      if (Array.isArray(statusRows) && statusRows.length > 0) {
+        bookingStatus = statusRows[0].status || null;
+      }
+    } catch (e) {
+      console.warn('Could not fetch booking status for response', e && e.message);
+    }
+
     // Generate customer token (for response)
     const customerToken = jwt.sign(
       {
@@ -466,10 +479,15 @@ exports._booking_save = async (req, res) => {
       { expiresIn: 86400 * 30 }
     );
 
+    // Prepare response message and include pending note when applicable
+    let responseMessage = isNewBooking ? "Booking added successfully" : "Booking updated successfully";
+    if (bookingStatus === 'pending') responseMessage += " (pending owner approval)";
+
     return res.status(isNewBooking ? 201 : 200).json({
-      message: isNewBooking ? "Booking added successfully" : "Booking updated successfully",
+      message: responseMessage,
       bookingkey: newBookingKey,
       customerkey: resolvedCustomerKey,
+      status: bookingStatus,
       token: customerToken
     });
 
@@ -821,7 +839,7 @@ exports._customer_bookings = async (req, res) => {
     const decoded = jwt.verify(token.split(' ')[1], config.secret);
 
     const bookings = await db.sequelize.query(
-      `SELECT pkey, servicekey, staffkey, datetime, bookingstart, bookingend, 
+      `SELECT pkey, status, servicekey, staffkey, datetime, bookingstart, bookingend, 
               note, customername, staffname, servicename, dateactivated
        FROM tblbooking 
        WHERE customerkey = :customerkey AND dateinactivated IS NULL and bookingstart >= NOW()
@@ -1520,10 +1538,9 @@ exports._bookingweb_save = async (req, res) => {
         config.secret,
         { expiresIn: 86400 * 30 }
       );
-
       // ✅ Send confirmation notifications (only for new bookings)
       if (finalEmail || finalPhone) {
-        console.log('📬 Sending confirmation notifications to:', {
+        console.log('📬 Preparing confirmation notifications to:', {
           email: finalEmail,
           phone: finalPhone
         });
@@ -1541,14 +1558,49 @@ exports._bookingweb_save = async (req, res) => {
 
         console.log('📦 Notification data:', notificationData);
 
-        Promise.all([
-          notifications.sendBookingEmail(notificationData),
-          notifications.sendBookingSMS(notificationData)
-        ]).then(results => {
-          console.log('📬 Confirmation notification results:', results);
-        }).catch(err => {
-          console.error('⚠️ Confirmation notification error (non-critical):', err);
-        });
+        try {
+          const settings = await notifications.getBookingSettings();
+          console.log('🔧 Booking settings loaded:', settings);
+          if (settings && settings.autoconfirm === false) {
+            // mark booking as pending and notify owner for approval
+            const updateResult = await db.sequelize.query(
+              "UPDATE tblbooking SET status = 'pending' WHERE pkey = :pkey",
+              { replacements: { pkey: Number(newBookingKey) }, type: db.sequelize.QueryTypes.UPDATE }
+            );
+
+            // inspect update result for affected rows
+            let affected = 0;
+            try {
+              const first = Array.isArray(updateResult) ? updateResult[0] : updateResult;
+              if (first && typeof first.affectedRows !== 'undefined') affected = first.affectedRows;
+              else if (typeof updateResult === 'number') affected = updateResult;
+              else if (Array.isArray(updateResult) && typeof updateResult[1] === 'number') affected = updateResult[1];
+            } catch (e) {
+              console.warn('Could not determine affected rows from updateResult', e && e.message);
+            }
+
+            if (affected > 0) {
+              console.log('⏳ Booking marked as pending awaiting owner approval:', newBookingKey, 'affectedRows=', affected);
+            } else {
+              console.warn('⚠️ Booking pending update affected 0 rows for pkey=', newBookingKey, 'updateResult=', updateResult);
+            }
+
+            await notifications.sendBookingApprovalRequestEmail(notificationData);
+            console.log('📧 Sent booking approval request to owner');
+          } else {
+            // auto-confirm path (default)
+            Promise.all([
+              notifications.sendBookingEmail(notificationData),
+              notifications.sendBookingSMS(notificationData)
+            ]).then(results => {
+              console.log('📬 Confirmation notification results:', results);
+            }).catch(err => {
+              console.error('⚠️ Confirmation notification error (non-critical):', err);
+            });
+          }
+        } catch (e) {
+          console.error('❌ Error handling auto-confirm setting:', e);
+        }
       } else {
         console.log('⚠️ No email or phone found in customer record for new booking');
       }
@@ -1567,10 +1619,26 @@ exports._bookingweb_save = async (req, res) => {
       { expiresIn: 86400 * 30 }
     );
 
+    // Fetch booking status to include in response
+    let bookingStatus = null;
+    try {
+      const rows = await db.sequelize.query(
+        "SELECT status FROM tblbooking WHERE pkey = :pkey LIMIT 1",
+        { replacements: { pkey: Number(newBookingKey) }, type: db.sequelize.QueryTypes.SELECT }
+      );
+      if (Array.isArray(rows) && rows.length > 0) bookingStatus = rows[0].status || null;
+    } catch (e) {
+      console.warn('Could not fetch booking status for response', e && e.message);
+    }
+
+    let responseMessage = isNewBooking ? "Booking added successfully" : "Booking updated successfully";
+    if (bookingStatus === 'pending') responseMessage += " (pending owner approval)";
+
     return res.status(isNewBooking ? 201 : 200).json({
-      message: isNewBooking ? "Booking added successfully" : "Booking updated successfully",
+      message: responseMessage,
       bookingkey: newBookingKey,
       customerkey: resolvedCustomerKey,
+      status: bookingStatus,
       token: customerToken
     });
 
@@ -1834,6 +1902,155 @@ exports._email_cancel_booking = async (req, res) => {
       </body>
       </html>
     `);
+  }
+};
+
+// Owner confirm endpoint - confirm booking via email link
+// GET /api/booking/owner/confirm?bookingkey=123&token=xyz
+exports._owner_confirm_booking = async (req, res) => {
+  try {
+    const { bookingkey, token } = req.query;
+
+    console.log('✅ Owner confirm request:', { bookingkey });
+
+    if (!bookingkey || !token) {
+      return res.status(400).send('Missing bookingkey or token');
+    }
+
+    // Verify token
+    let decoded;
+    try {
+      decoded = jwt.verify(token, config.secret);
+      console.log('✅ Token verified for owner confirm:', decoded);
+    } catch (verifyErr) {
+      console.error('❌ Token verification failed for owner confirm:', verifyErr.message);
+      return res.status(401).send('Invalid or expired token');
+    }
+
+    // Get booking
+    const bookingRows = await db.sequelize.query(
+      `SELECT pkey, customerkey, datetime, bookingstart, customername, customeremail, customerphone, servicename, staffname, status
+       FROM tblbooking WHERE pkey = :bookingkey AND dateinactivated IS NULL LIMIT 1`,
+      { replacements: { bookingkey: Number(bookingkey) }, type: db.sequelize.QueryTypes.SELECT }
+    );
+
+    if (!bookingRows || bookingRows.length === 0) {
+      return res.status(404).send('Booking not found');
+    }
+
+    const booking = bookingRows[0];
+
+    if (booking.status === 'cancelled') {
+      return res.status(400).send('Booking already cancelled');
+    }
+
+    if (booking.status === 'confirmed') {
+      return res.status(200).send('Booking already confirmed');
+    }
+
+    // Update booking to confirmed
+    await db.sequelize.query(
+      "UPDATE tblbooking SET status = 'confirmed', dateactivated = COALESCE(dateactivated, NOW()) WHERE pkey = :pkey",
+      { replacements: { pkey: Number(bookingkey) }, type: db.sequelize.QueryTypes.UPDATE }
+    );
+
+    console.log('✅ Booking confirmed by owner:', bookingkey);
+
+    // Send confirmation notifications to customer if available
+    const customerInfo = await db.sequelize.query(
+      "SELECT email, phone, fullname FROM tblcustomer WHERE pkey = :customerkey LIMIT 1",
+      { replacements: { customerkey: booking.customerkey }, type: db.sequelize.QueryTypes.SELECT }
+    );
+
+    let finalEmail = booking.customeremail;
+    let finalPhone = booking.customerphone;
+    let finalName = booking.customername;
+
+    if (customerInfo && customerInfo.length > 0) {
+      finalEmail = finalEmail || customerInfo[0].email;
+      finalPhone = finalPhone || customerInfo[0].phone;
+      finalName = finalName || customerInfo[0].fullname;
+    }
+
+    const notificationData = {
+      bookingkey: Number(bookingkey),
+      customername: finalName || 'Guest',
+      customeremail: finalEmail,
+      customerphone: finalPhone,
+      datetime: formatDatetimeForDisplay(booking.bookingstart || booking.datetime),
+      servicename: booking.servicename || 'Service',
+      staffname: booking.staffname || 'Staff',
+      token // token from query
+    };
+
+    if (finalEmail || finalPhone) {
+      Promise.all([
+        notifications.sendBookingEmail(notificationData),
+        notifications.sendBookingSMS(notificationData)
+      ]).then(results => {
+        console.log('📬 Owner-triggered confirmation notifications results:', results);
+      }).catch(err => {
+        console.error('⚠️ Owner-triggered confirmation notification error (non-critical):', err);
+      });
+    }
+
+    // Return a friendly HTML success page with actions
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const viewUrl = `${frontendUrl}/booking/view?bookingkey=${bookingkey}`;
+
+    return res.status(200).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Booking Confirmed</title>
+        <style>
+          body { font-family: Arial, sans-serif; background: #f5f7fb; color: #333; }
+          .container { max-width: 600px; margin: 60px auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,0.08); text-align: center; }
+          .title { font-size: 28px; color: #2e7d32; margin-bottom: 10px; }
+          .message { margin: 20px 0; color: #555; }
+          .buttons a { display: inline-block; margin: 8px; padding: 12px 20px; border-radius: 6px; text-decoration: none; color: white; font-weight: 600; }
+          .btn-view { background: #1976d2; }
+          .btn-close { background: #616161; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="title">✅ Booking Confirmed</div>
+          <div class="message">Booking #${bookingkey} has been confirmed successfully.</div>
+          <div class="buttons">
+            <a class="btn-view" href="${viewUrl}" target="_blank" rel="noopener">View Booking Details</a>
+            <a class="btn-close" href="#" onclick="window.close();return false;">Back to Inbox</a>
+          </div>
+          <p style="margin-top:20px;color:#999;font-size:13px;">If the "Back to Inbox" button does not close your mail tab automatically, you'll be redirected shortly.</p>
+        </div>
+
+        <script>
+          (function(){
+            var viewUrl = ${JSON.stringify(viewUrl)};
+            // Try to close the window immediately (works when opened by script)
+            try { window.close(); } catch(e) {}
+            // If window is still open after 800ms, redirect to the frontend view
+            setTimeout(function(){
+              try {
+                // If window was not closed, navigate to view URL
+                if (!window.closed) {
+                  window.location.href = viewUrl;
+                }
+              } catch (e) {
+                // fallback: open in same tab
+                window.location.href = viewUrl;
+              }
+            }, 800);
+          })();
+        </script>
+      </body>
+      </html>
+    `);
+  } catch (err) {
+    console.error('❌ Owner confirm error:', err);
+    return res.status(500).send('Internal Server Error');
   }
 };
 

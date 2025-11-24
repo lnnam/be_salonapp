@@ -95,6 +95,155 @@ async function getSalonInfo() {
 }
 
 /**
+ * Get booking-related settings from tblsetting for the salon
+ * Returns { autoconfirm: boolean, salon_email: string }
+ */
+exports.getBookingSettings = async (pkey) => {
+    // allow overriding the pkey (default to 1)
+    const settingPkey = typeof pkey !== 'undefined' ? Number(pkey) : Number(process.env.SETTING_PKEY || 1);
+    try {
+        const rows = await db.sequelize.query(
+            `SELECT * FROM tblsetting WHERE 1 LIMIT 1`,
+            { replacements: { pkey: settingPkey }, type: db.sequelize.QueryTypes.SELECT }
+        );
+
+        const result = { autoconfirm: true, salon_email: null };
+
+        if (Array.isArray(rows) && rows.length > 0) {
+            const r = rows[0];
+
+            // Direct column names (preferred): autoconfirm, salon_email, email
+            if (typeof r.autoconfirm !== 'undefined') {
+                const v = String(r.autoconfirm).toLowerCase();
+                result.autoconfirm = (v === 'true' || v === '1' || v === 'yes' || v === 'on');
+            } else if (typeof r.auto_confirm !== 'undefined') {
+                const v = String(r.auto_confirm).toLowerCase();
+                result.autoconfirm = (v === 'true' || v === '1' || v === 'yes' || v === 'on');
+            }
+
+            if (typeof r.salon_email !== 'undefined' && r.salon_email) {
+                result.salon_email = r.salon_email;
+            } else if (typeof r.email !== 'undefined' && r.email) {
+                result.salon_email = r.email;
+            }
+
+            // If table stores a JSON blob in a value column, try parsing it
+            if (!result.salon_email && typeof r.settingvalue === 'string' && r.settingvalue.trim()) {
+                try {
+                    const parsed = JSON.parse(r.settingvalue);
+                    if (parsed) {
+                        if (typeof parsed.autoconfirm !== 'undefined') {
+                            const v = String(parsed.autoconfirm).toLowerCase();
+                            result.autoconfirm = (v === 'true' || v === '1' || v === 'yes' || v === 'on');
+                        }
+                        if (parsed.salon_email) result.salon_email = parsed.salon_email;
+                        if (!result.salon_email && parsed.email) result.salon_email = parsed.email;
+                    }
+                } catch (e) {
+                    // not JSON - ignore
+                }
+            }
+        }
+
+        // fallback to salon info email
+        if (!result.salon_email) {
+            const salon = await getSalonInfo();
+            result.salon_email = salon.email;
+        }
+
+        return result;
+    } catch (err) {
+        console.error('❌ Error fetching booking settings by pkey:', err);
+        const salon = await getSalonInfo();
+        return { autoconfirm: true, salon_email: salon.email };
+    }
+};
+
+/**
+ * Send an approval-request email to the salon owner when autoconfirm is disabled
+ * bookingData: { bookingkey, customername, customeremail, customerphone, datetime, servicename, staffname, token }
+ */
+exports.sendBookingApprovalRequestEmail = async (bookingData) => {
+    if (!EMAIL_ENABLED) {
+        console.log('⚠️ Email notifications are disabled');
+        return { success: false, reason: 'Email notifications disabled' };
+    }
+
+    if (!emailTransporter) {
+        console.log('⚠️ Email transporter not initialized');
+        return { success: false, reason: 'Email transporter not configured' };
+    }
+
+    try {
+        const { bookingkey, customername, customeremail, customerphone, datetime, servicename, staffname, token } = bookingData;
+
+        const settings = await exports.getBookingSettings();
+        const toEmail = settings.salon_email;
+        if (!toEmail) {
+            console.log('⚠️ No salon email configured, skipping owner approval email');
+            return { success: false, reason: 'No salon email' };
+        }
+
+        const salon = await getSalonInfo();
+
+        const logoHtml = salon.photobase64
+            ? `<img src="data:image/png;base64,${salon.photobase64}" alt="${salon.name}" style="max-width: 200px; margin-bottom: 20px;">`
+            : salon.photo
+                ? `<img src="${salon.photo}" alt="${salon.name}" style="max-width: 200px; margin-bottom: 20px;">`
+                : '';
+
+        const backendUrl = process.env.BACKEND_URL || 'http://localhost:8080';
+        const confirmUrl = `${backendUrl}/api/booking/owner/confirm?bookingkey=${bookingkey}&token=${encodeURIComponent(token || '')}`;
+        const cancelUrl = `${backendUrl}/api/booking/email-cancel?bookingkey=${bookingkey}&token=${encodeURIComponent(token || '')}`;
+        const viewUrl = `${backendUrl}/api/booking/email-view?bookingkey=${bookingkey}&token=${encodeURIComponent(token || '')}`;
+
+        const buttonsHtml = `
+            <div style="text-align:center;margin:30px 0;">
+              <a href="${confirmUrl}" style="display:inline-block;background-color:#4CAF50;color:white;padding:12px 30px;text-decoration:none;border-radius:5px;margin:5px;font-weight:bold;">✅ Confirm Booking</a>
+              <a href="${cancelUrl}" style="display:inline-block;background-color:#F44336;color:white;padding:12px 30px;text-decoration:none;border-radius:5px;margin:5px;font-weight:bold;">❌ Cancel Booking</a>
+              <a href="${viewUrl}" style="display:inline-block;background-color:#2196F3;color:white;padding:12px 30px;text-decoration:none;border-radius:5px;margin:5px;font-weight:bold;">👁️ View Details</a>
+            </div>
+        `;
+
+        const mailOptions = {
+            from: process.env.SMTP_FROM || `"${salon.name}" <${salon.email}>`,
+            to: toEmail,
+            subject: `Booking Approval Required - ${salon.name}`,
+            html: `
+        <div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto; padding: 20px;">
+          ${logoHtml}
+          <h2 style="color: #333; border-bottom: 2px solid #FF9800; padding-bottom: 10px;">Booking Requires Approval</h2>
+          <p>A new booking has been created and requires your confirmation.</p>
+
+          <div style="background-color:#fff9e6;padding:20px;border-radius:6px;margin:20px 0;border-left:4px solid #FFB300;">
+            <p style="margin:10px 0;"><strong>Booking ID:</strong> #${bookingkey}</p>
+            <p style="margin:10px 0;"><strong>Customer:</strong> ${customername || 'Guest'} (${customeremail || 'no-email'})</p>
+            <p style="margin:10px 0;"><strong>Phone:</strong> ${customerphone || 'N/A'}</p>
+            <p style="margin:10px 0;"><strong>Service:</strong> ${servicename || 'N/A'}</p>
+            <p style="margin:10px 0;"><strong>Staff:</strong> ${staffname || 'N/A'}</p>
+            <p style="margin:10px 0;"><strong>Date & Time:</strong> ${datetime || 'N/A'}</p>
+          </div>
+
+          ${buttonsHtml}
+
+          <p style="color:#666;">If you have any questions, contact ${salon.name}.</p>
+          <hr style="margin:30px 0;border:none;border-top:1px solid #ddd;">
+          <p style="color:#999;font-size:12px;text-align:center;">This is an automated message.</p>
+        </div>
+      `
+        };
+
+        const info = await emailTransporter.sendMail(mailOptions);
+        console.log('✅ Approval request email sent to owner:', info.messageId);
+        return { success: true, messageId: info.messageId };
+    } catch (err) {
+        console.error('❌ Approval request email error:', err);
+        return { success: false, error: err.message };
+    }
+};
+
+
+/**
  * Generate action buttons HTML using backend URLs
  */
 function getActionButtons(bookingkey, token, showCancel = true, showChange = true) {
