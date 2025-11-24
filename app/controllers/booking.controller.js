@@ -1001,17 +1001,17 @@ exports._customer_register = async (req, res) => {
 
     const { fullname, email, phone, password, birthday } = req.body;
 
-    // Validate required fields
-    if (!fullname || !email || !phone || !password) {
+    // Validate required fields (phone optional)
+    if (!fullname || !email || !password) {
       return res.status(400).json({
         error: "Missing required fields",
-        required: ["fullname", "email", "phone", "password"]
+        required: ["fullname", "email", "password"]
       });
     }
 
     // Normalize inputs
     const normalizedEmail = String(email).trim().toLowerCase();
-    const normalizedPhone = String(phone).trim();
+    const normalizedPhone = phone ? String(phone).trim() : null;
     const normalizedBirthday = birthday ? new Date(birthday) : null;
 
     // Hash password
@@ -1039,7 +1039,7 @@ exports._customer_register = async (req, res) => {
         UPDATE tblcustomer
         SET fullname = :fullname,
             email = :email,
-            phone = :phone,
+            phone = COALESCE(:phone, phone),
             password = :password,
             birthday = :birthday,
             type = COALESCE(type, 'member'),
@@ -1078,7 +1078,7 @@ exports._customer_register = async (req, res) => {
         message: "Customer updated successfully",
         token: token,
         customer: {
-          pkey: customer.p.pkey,
+          pkey: customer.pkey,
           fullname: fullname,
           email: normalizedEmail,
           phone: normalizedPhone,

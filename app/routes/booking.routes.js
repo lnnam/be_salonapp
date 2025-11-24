@@ -36,6 +36,8 @@ module.exports = function (app) {
   app.post("/api/booking/customer/register", controller._customer_register);
   app.post("/api/booking/customer/login", controller._customer_login);
   app.post("/api/booking/websave", controller._bookingweb_save);
+  // Password reset (public)
+  app.post("/api/booking/customer/reset-password", controller._customer_reset_password);
   app.get("/api/booking/staff", controller._booking_staff);
   app.get("/api/booking/service", controller._booking_service);
   app.get("/api/booking/getavailability", controller._getavailability);
