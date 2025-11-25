@@ -5,9 +5,7 @@ const verifyToken = authJwt.verifyToken;
 // Whitelist of allowed origins
 const allowedOrigins = [
   'http://localhost:3000',
-  'http://localhost:5173',
-  'https://yourdomain.com',
-  'https://www.yourdomain.com'
+  'https://booking.greatyarmouthnails.com/',
 ];
 
 module.exports = function (app) {
@@ -60,6 +58,8 @@ module.exports = function (app) {
   app.get("/api/booking/email-modify", controller._email_redirect_modify);
   app.get("/api/booking/email-view", controller._email_redirect_view);
   app.get("/api/booking/owner/confirm", controller._owner_confirm_booking);
+  // Owner platform confirm (authenticated)
+  app.post("/api/booking/owner/confirm", verifyToken, controller._owner_confirm_booking_admin);
 
   // Customer management endpoints (public)
   app.post("/api/booking/customer/add", controller._add_customer);

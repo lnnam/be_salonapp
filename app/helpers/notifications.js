@@ -198,12 +198,11 @@ exports.sendBookingApprovalRequestEmail = async (bookingData) => {
         const viewUrl = `${backendUrl}/api/booking/email-view?bookingkey=${bookingkey}&token=${encodeURIComponent(token || '')}`;
 
         const buttonsHtml = `
-            <div style="text-align:center;margin:30px 0;">
-              <a href="${confirmUrl}" style="display:inline-block;background-color:#4CAF50;color:white;padding:12px 30px;text-decoration:none;border-radius:5px;margin:5px;font-weight:bold;">✅ Confirm Booking</a>
-              <a href="${cancelUrl}" style="display:inline-block;background-color:#F44336;color:white;padding:12px 30px;text-decoration:none;border-radius:5px;margin:5px;font-weight:bold;">❌ Cancel Booking</a>
-              <a href="${viewUrl}" style="display:inline-block;background-color:#2196F3;color:white;padding:12px 30px;text-decoration:none;border-radius:5px;margin:5px;font-weight:bold;">👁️ View Details</a>
-            </div>
-        `;
+                        <div style="text-align:center;margin:30px 0;">
+                            <a href="${confirmUrl}" style="display:inline-block;background-color:#4CAF50;color:white;padding:12px 30px;text-decoration:none;border-radius:5px;margin:5px;font-weight:bold;">✅ Confirm Booking</a>
+                            <a href="${cancelUrl}" style="display:inline-block;background-color:#F44336;color:white;padding:12px 30px;text-decoration:none;border-radius:5px;margin:5px;font-weight:bold;">❌ Cancel Booking</a>
+                        </div>
+                `;
 
         const mailOptions = {
             from: process.env.SMTP_FROM || `"${salon.name}" <${salon.email}>`,

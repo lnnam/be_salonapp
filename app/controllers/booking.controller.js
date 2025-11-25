@@ -519,8 +519,7 @@ exports._booking_del = async (req, res) => {
 
     const updateQuery = `
       UPDATE tblbooking
-      SET status = 'cancelled',
-          dateinactivated = NOW()
+      SET status = 'cancelled'
       WHERE pkey = :pkey
     `;
 
@@ -546,9 +545,9 @@ exports._booking_del = async (req, res) => {
     }
 
     if (!affectedRows) {
-      console.warn(`No booking row was updated for pkey=${pkey}.`);
-      // still respond success for idempotency, but notify caller
-      return res.status(404).json({ error: 'Booking not found or already cancelled' });
+      console.warn(`No booking row was updated for pkey=${pkey}. Will still attempt to send notifications if booking details were found.`);
+      // Do not return here — some DB drivers return unexpected shapes for UPDATE results.
+      // If we retrieved booking details above, attempt to send notifications anyway for robustness.
     }
 
     // 📧 Send cancellation notifications if booking existed
@@ -643,8 +642,7 @@ exports._customer_cancel_booking = async (req, res) => {
 
     const cancelQuery = `
       UPDATE tblbooking
-      SET status = 'cancelled',
-          dateinactivated = NOW()
+      SET status = 'cancelled'
       WHERE pkey = :bookingkey
     `;
 
@@ -1774,8 +1772,7 @@ exports._email_cancel_booking = async (req, res) => {
     // Cancel the booking
     const cancelQuery = `
       UPDATE tblbooking
-      SET status = 'cancelled',
-          dateinactivated = NOW()
+      SET status = 'cancelled'
       WHERE pkey = :bookingkey
     `;
 
@@ -2051,6 +2048,93 @@ exports._owner_confirm_booking = async (req, res) => {
   } catch (err) {
     console.error('❌ Owner confirm error:', err);
     return res.status(500).send('Internal Server Error');
+  }
+};
+
+// Owner confirm endpoint for owner platform (authenticated)
+// POST /api/booking/owner/confirm
+// Body: { bookingkey }
+exports._owner_confirm_booking_admin = async (req, res) => {
+  try {
+    const { bookingkey } = req.body;
+
+    if (!bookingkey) {
+      return res.status(400).json({ error: 'Missing bookingkey' });
+    }
+
+    console.log('✅ Owner (admin) confirm request:', { bookingkey, by: req.user && req.user.id });
+
+    // Get booking
+    const bookingRows = await db.sequelize.query(
+      `SELECT pkey, customerkey, datetime, bookingstart, customername, customeremail, customerphone, servicename, staffname, status
+       FROM tblbooking WHERE pkey = :bookingkey AND dateinactivated IS NULL LIMIT 1`,
+      { replacements: { bookingkey: Number(bookingkey) }, type: db.sequelize.QueryTypes.SELECT }
+    );
+
+    if (!bookingRows || bookingRows.length === 0) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    const booking = bookingRows[0];
+
+    if (booking.status === 'cancelled') {
+      return res.status(400).json({ error: 'Booking already cancelled' });
+    }
+
+    if (booking.status === 'confirmed') {
+      return res.status(200).json({ message: 'Booking already confirmed', bookingkey: Number(bookingkey), status: 'confirmed' });
+    }
+
+    // Update booking to confirmed
+    await db.sequelize.query(
+      "UPDATE tblbooking SET status = 'confirmed', dateactivated = COALESCE(dateactivated, NOW()) WHERE pkey = :pkey",
+      { replacements: { pkey: Number(bookingkey) }, type: db.sequelize.QueryTypes.UPDATE }
+    );
+
+    console.log('✅ Booking confirmed by owner (admin):', bookingkey);
+
+    // Send confirmation notifications to customer if available
+    const customerInfo = await db.sequelize.query(
+      "SELECT email, phone, fullname FROM tblcustomer WHERE pkey = :customerkey LIMIT 1",
+      { replacements: { customerkey: booking.customerkey }, type: db.sequelize.QueryTypes.SELECT }
+    );
+
+    let finalEmail = booking.customeremail;
+    let finalPhone = booking.customerphone;
+    let finalName = booking.customername;
+
+    if (customerInfo && customerInfo.length > 0) {
+      finalEmail = finalEmail || customerInfo[0].email;
+      finalPhone = finalPhone || customerInfo[0].phone;
+      finalName = finalName || customerInfo[0].fullname;
+    }
+
+    const notificationData = {
+      bookingkey: Number(bookingkey),
+      customername: finalName || 'Guest',
+      customeremail: finalEmail,
+      customerphone: finalPhone,
+      datetime: formatDatetimeForDisplay(booking.bookingstart || booking.datetime),
+      servicename: booking.servicename || 'Service',
+      staffname: booking.staffname || 'Staff'
+    };
+
+    if (finalEmail || finalPhone) {
+      Promise.all([
+        notifications.sendBookingEmail(notificationData),
+        notifications.sendBookingSMS(notificationData)
+      ]).then(results => {
+        console.log('📬 Owner (admin)-triggered confirmation notifications results:', results);
+      }).catch(err => {
+        console.error('⚠️ Owner (admin)-triggered confirmation notification error (non-critical):', err);
+      });
+    }
+
+    return res.status(200).json({ message: 'Booking confirmed', bookingkey: Number(bookingkey), status: 'confirmed' });
+
+  } catch (err) {
+    console.error('❌ Owner (admin) confirm error:', err);
+    return res.status(500).json({ error: 'Internal Server Error', details: err.message });
   }
 };
 
