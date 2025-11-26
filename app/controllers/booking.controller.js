@@ -481,7 +481,7 @@ exports._booking_save = async (req, res) => {
 
     // Prepare response message and include pending note when applicable
     let responseMessage = isNewBooking ? "Booking added successfully" : "Booking updated successfully";
-    if (bookingStatus === 'pending') responseMessage += " (pending owner approval)";
+    if (bookingStatus === 'pending') responseMessage += " (pending salon approval)";
 
     return res.status(isNewBooking ? 201 : 200).json({
       message: responseMessage,
@@ -1630,7 +1630,7 @@ exports._bookingweb_save = async (req, res) => {
     }
 
     let responseMessage = isNewBooking ? "Booking added successfully" : "Booking updated successfully";
-    if (bookingStatus === 'pending') responseMessage += " (pending owner approval)";
+    if (bookingStatus === 'pending') responseMessage += " (pending salon approval)";
 
     return res.status(isNewBooking ? 201 : 200).json({
       message: responseMessage,
