@@ -841,7 +841,7 @@ exports._customer_bookings = async (req, res) => {
               note, customername, staffname, servicename, dateactivated
        FROM tblbooking 
        WHERE customerkey = :customerkey AND dateinactivated IS NULL and bookingstart >= NOW()
-       ORDER BY datetime DESC`,
+       ORDER BY bookingstart `,
       {
         replacements: { customerkey: decoded.customerkey },
         type: db.sequelize.QueryTypes.SELECT
