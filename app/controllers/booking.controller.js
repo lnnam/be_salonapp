@@ -87,7 +87,7 @@ exports._booking_listcustomer = async (req, res) => {
       type: db.sequelize.QueryTypes.SELECT,
     });
     res.status(200).send(objstore);
-    console.log(objstore);
+   // console.log(objstore);
   }
   catch (err) {
     res.status(500).send({ error: err.message });
@@ -223,6 +223,21 @@ exports._booking_save = async (req, res) => {
       // UPDATE existing booking
       console.log('📝 Updating booking:', bookingkey, 'with customerkey:', resolvedCustomerKey);
 
+      // Fetch existing bookingstart to detect time changes
+      let existingBookingStart = null;
+      try {
+        const existingRows = await db.sequelize.query(
+          "SELECT bookingstart, status FROM tblbooking WHERE pkey = :bookingkey LIMIT 1",
+          { replacements: { bookingkey: Number(bookingkey) }, type: db.sequelize.QueryTypes.SELECT }
+        );
+        if (Array.isArray(existingRows) && existingRows.length > 0) {
+          existingBookingStart = existingRows[0].bookingstart || null;
+          console.log('🔎 Existing bookingstart:', existingBookingStart);
+        }
+      } catch (e) {
+        console.warn('⚠️ Could not fetch existing booking for change detection', e && e.message);
+      }
+
       // ✅ Fetch customer email and phone from tblcustomer
       const customerInfo = await db.sequelize.query(
         "SELECT email, phone, fullname FROM tblcustomer WHERE pkey = :customerkey LIMIT 1",
@@ -291,6 +306,10 @@ exports._booking_save = async (req, res) => {
 
       console.log('✅ Booking updated, preparing notifications...');
 
+      // Determine whether booking time changed
+      const timeChanged = existingBookingStart && String(existingBookingStart) !== String(bookingStart);
+      if (timeChanged) console.log('⏰ Booking time changed for pkey=', newBookingKey);
+
       // ✅ Generate customer token for modified booking
       const customerToken = jwt.sign(
         {
@@ -323,15 +342,45 @@ exports._booking_save = async (req, res) => {
         };
 
         console.log('📦 Notification data:', notificationData);
+        try {
+          const settings = await notifications.getBookingSettings();
+          console.log('🔧 Booking settings loaded (update):', settings);
+          if (timeChanged && settings && settings.autoconfirm === false) {
+            // mark booking as pending and notify owner for approval
+            const pendingResult = await db.sequelize.query(
+              "UPDATE tblbooking SET status = 'pending' WHERE pkey = :pkey",
+              { replacements: { pkey: Number(newBookingKey) }, type: db.sequelize.QueryTypes.UPDATE }
+            );
 
-        Promise.all([
-          notifications.sendBookingModificationEmail(notificationData),
-          notifications.sendBookingModificationSMS(notificationData)
-        ]).then(results => {
-          console.log('📬 Modification notification results:', results);
-        }).catch(err => {
-          console.error('⚠️ Modification notification error (non-critical):', err);
-        });
+            // Log pending update result
+            console.log('⏳ Booking marked as pending (update) result:', pendingResult);
+
+            // Send approval request to owner
+            await notifications.sendBookingApprovalRequestEmail(notificationData);
+            console.log('📧 Sent booking approval request to owner (update)');
+          } else {
+            // No time change or auto-confirm enabled — send modification notifications to customer
+            Promise.all([
+              notifications.sendBookingModificationEmail(notificationData),
+              notifications.sendBookingModificationSMS(notificationData)
+            ]).then(results => {
+              console.log('📬 Modification notification results:', results);
+            }).catch(err => {
+              console.error('⚠️ Modification notification error (non-critical):', err);
+            });
+          }
+        } catch (e) {
+          console.error('❌ Error handling auto-confirm setting for update:', e);
+          // fallback: send modification notifications
+          Promise.all([
+            notifications.sendBookingModificationEmail(notificationData),
+            notifications.sendBookingModificationSMS(notificationData)
+          ]).then(results => {
+            console.log('📬 Modification notification results (fallback):', results);
+          }).catch(err => {
+            console.error('⚠️ Modification notification error (fallback):', err);
+          });
+        }
       } else {
         console.log('⚠️ No email or phone found in customer record');
       }
