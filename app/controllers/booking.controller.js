@@ -87,7 +87,7 @@ exports._booking_listcustomer = async (req, res) => {
       type: db.sequelize.QueryTypes.SELECT,
     });
     res.status(200).send(objstore);
-   // console.log(objstore);
+    // console.log(objstore);
   }
   catch (err) {
     res.status(500).send({ error: err.message });
@@ -215,6 +215,8 @@ exports._booking_save = async (req, res) => {
     const bookingEnd = new Date(bookingStart);
     bookingEnd.setMinutes(bookingEnd.getMinutes() + 45);
     const bookingEndStr = bookingEnd.toISOString().slice(0, 19).replace("T", " ");
+    // Track whether the booking time changed during an update
+    let timeChanged = false;
 
     let newBookingKey = bookingkey;
     let isNewBooking = false;
@@ -223,7 +225,7 @@ exports._booking_save = async (req, res) => {
       // UPDATE existing booking
       console.log('📝 Updating booking:', bookingkey, 'with customerkey:', resolvedCustomerKey);
 
-      // Fetch existing bookingstart to detect time changes
+      // For web flow: fetch current bookingstart BEFORE we update so we can detect time changes
       let existingBookingStart = null;
       try {
         const existingRows = await db.sequelize.query(
@@ -232,11 +234,15 @@ exports._booking_save = async (req, res) => {
         );
         if (Array.isArray(existingRows) && existingRows.length > 0) {
           existingBookingStart = existingRows[0].bookingstart || null;
-          console.log('🔎 Existing bookingstart:', existingBookingStart);
+          console.log('🔎 Existing bookingstart (web pre-update):', existingBookingStart);
         }
       } catch (e) {
-        console.warn('⚠️ Could not fetch existing booking for change detection', e && e.message);
+        console.warn('⚠️ Could not fetch existing booking for web change detection', e && e.message);
       }
+
+
+
+
 
       // ✅ Fetch customer email and phone from tblcustomer
       const customerInfo = await db.sequelize.query(
@@ -306,9 +312,21 @@ exports._booking_save = async (req, res) => {
 
       console.log('✅ Booking updated, preparing notifications...');
 
-      // Determine whether booking time changed
-      const timeChanged = existingBookingStart && String(existingBookingStart) !== String(bookingStart);
-      if (timeChanged) console.log('⏰ Booking time changed for pkey=', newBookingKey);
+      // Determine whether booking time changed (compare timestamps)
+      timeChanged = false;
+      try {
+        if (existingBookingStart) {
+          const existingTime = new Date(existingBookingStart).getTime();
+          const newTime = new Date(bookingStart).getTime();
+          timeChanged = existingTime !== newTime;
+        }
+      } catch (e) {
+        // fallback to string compare
+        timeChanged = existingBookingStart && String(existingBookingStart) !== String(bookingStart);
+      }
+      if (timeChanged) console.log('⏰ Booking time changed (web) for pkey=', newBookingKey);
+
+
 
       // ✅ Generate customer token for modified booking
       const customerToken = jwt.sign(
@@ -1382,12 +1400,26 @@ exports._bookingweb_save = async (req, res) => {
     bookingEnd.setMinutes(bookingEnd.getMinutes() + 45);
     const bookingEndStr = bookingEnd.toISOString().slice(0, 19).replace("T", " ");
 
-    let newBookingKey = bookingkey;
+    let newBookingKey = isUpdating ? Number(bookingkey) : null;
     let isNewBooking = false;
 
     if (isUpdating) {
       // UPDATE existing booking
       console.log('📝 Updating booking:', bookingkey, 'with customerkey:', resolvedCustomerKey);
+
+      // Fetch existing bookingstart to detect time changes
+      let existingBookingStart = null;
+      try {
+        const existingRows = await db.sequelize.query(
+          "SELECT bookingstart FROM tblbooking WHERE pkey = :bookingkey LIMIT 1",
+          { replacements: { bookingkey: Number(bookingkey) }, type: db.sequelize.QueryTypes.SELECT }
+        );
+        if (Array.isArray(existingRows) && existingRows.length > 0) {
+          existingBookingStart = existingRows[0].bookingstart;
+        }
+      } catch (e) {
+        console.warn('Could not fetch existing booking start');
+      }
 
       // ✅ Fetch customer email and phone from tblcustomer
       const customerInfo = await db.sequelize.query(
@@ -1457,6 +1489,19 @@ exports._bookingweb_save = async (req, res) => {
 
       console.log('✅ Booking updated, preparing notifications...');
 
+      // Determine whether booking time changed (compare timestamps)
+      timeChanged = false;
+      try {
+        if (existingBookingStart) {
+          const existingTime = new Date(existingBookingStart).getTime();
+          const newTime = new Date(bookingStart).getTime();
+          timeChanged = existingTime !== newTime;
+        }
+      } catch (e) {
+        timeChanged = existingBookingStart && String(existingBookingStart) !== String(bookingStart);
+      }
+      if (timeChanged) console.log('⏰ Booking time changed (web) for pkey=', newBookingKey);
+
       // ✅ Generate customer token for modified booking
       const customerToken = jwt.sign(
         {
@@ -1490,14 +1535,71 @@ exports._bookingweb_save = async (req, res) => {
 
         console.log('📦 Notification data:', notificationData);
 
-        Promise.all([
-          notifications.sendBookingModificationEmail(notificationData),
-          notifications.sendBookingModificationSMS(notificationData)
-        ]).then(results => {
-          console.log('📬 Modification notification results:', results);
-        }).catch(err => {
-          console.error('⚠️ Modification notification error (non-critical):', err);
-        });
+        try {
+          const settings = await notifications.getBookingSettings();
+          console.log('🔧 Booking settings loaded (web update):', settings);
+          if (timeChanged && settings && settings.autoconfirm === false) {
+            // mark booking as pending and notify owner for approval
+            const pendingResult = await db.sequelize.query(
+              "UPDATE tblbooking SET status = 'pending' WHERE pkey = :pkey",
+              { replacements: { pkey: Number(newBookingKey) }, type: db.sequelize.QueryTypes.UPDATE }
+            );
+            console.log('⏳ Booking marked as pending (web update) result:', pendingResult);
+            await notifications.sendBookingApprovalRequestEmail(notificationData);
+            console.log('📧 Sent booking approval request to owner (web update)');
+
+            // Fetch current booking status to return to client and avoid sending customer notifications
+            let bookingStatusNow = 'pending';
+            try {
+              const statusRows = await db.sequelize.query(
+                "SELECT status FROM tblbooking WHERE pkey = :pkey LIMIT 1",
+                { replacements: { pkey: Number(newBookingKey) }, type: db.sequelize.QueryTypes.SELECT }
+              );
+              if (Array.isArray(statusRows) && statusRows.length > 0) bookingStatusNow = statusRows[0].status || bookingStatusNow;
+            } catch (e) {
+              console.warn('Could not read booking status after marking pending', e && e.message);
+            }
+
+            const responseMessage = "Booking updated successfully (pending salon approval)";
+            return res.status(200).json({
+              message: responseMessage,
+              bookingkey: newBookingKey,
+              customerkey: resolvedCustomerKey,
+              status: bookingStatusNow,
+              token: customerToken
+            });
+          } else {
+            // No time change or auto-confirm enabled — send modification notifications to customer
+            Promise.all([
+              notifications.sendBookingModificationEmail(notificationData),
+              notifications.sendBookingModificationSMS(notificationData)
+            ]).then(results => {
+              console.log('📬 Modification notification results:', results);
+            }).catch(err => {
+              console.error('⚠️ Modification notification error (non-critical):', err);
+            });
+
+            // Return success response for normal modification
+            return res.status(200).json({
+              message: "Booking updated successfully",
+              bookingkey: newBookingKey,
+              customerkey: resolvedCustomerKey,
+              status: 'confirmed',
+              token: customerToken
+            });
+          }
+        } catch (e) {
+          console.error('❌ Error handling auto-confirm setting for web update:', e);
+          // fallback: send modification notifications
+          Promise.all([
+            notifications.sendBookingModificationEmail(notificationData),
+            notifications.sendBookingModificationSMS(notificationData)
+          ]).then(results => {
+            console.log('📬 Modification notification results (fallback):', results);
+          }).catch(err => {
+            console.error('⚠️ Modification notification error (fallback):', err);
+          });
+        }
       } else {
         console.log('⚠️ No email or phone found in customer record');
       }
