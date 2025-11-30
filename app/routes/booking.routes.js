@@ -1,6 +1,7 @@
 const { authJwt } = require("../middleware");
 const controller = require("../controllers/booking.controller");
 const verifyToken = authJwt.verifyToken;
+const verifyCustomerToken = authJwt.verifyCustomerToken;
 
 // Whitelist of allowed origins
 const allowedOrigins = [
@@ -52,6 +53,9 @@ module.exports = function (app) {
   app.post("/api/booking/save", verifyToken, controller._booking_save);
   app.post("/api/booking/customer/register-member", verifyToken, controller._register_member);
   app.delete("/api/booking/del/:pkey", verifyToken, controller._booking_del);
+
+  // Protected customer endpoints 
+  app.get("/api/booking/setting", controller._get_app_setting);
 
   // Email action endpoints (with token authentication)
   app.get("/api/booking/email-cancel", controller._email_cancel_booking);

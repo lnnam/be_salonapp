@@ -2406,4 +2406,42 @@ exports._add_customer = async (req, res) => {
   }
 };
 
+// Get app settings (authenticated endpoint)
+// GET /api/booking/setting
+// Headers: { Authorization: "Bearer <token>" }
+exports._get_app_setting = async (req, res) => {
+  try {
+    console.log('⚙️ Get app settings request');
+
+    // Query all settings from tblsetting
+    const settings = await db.sequelize.query(
+      "SELECT * FROM tblsetting limit 1",
+      {
+        type: db.sequelize.QueryTypes.SELECT
+      }
+    );
+
+    if (!settings || settings.length === 0) {
+      return res.status(200).json({
+        message: "No settings found",
+        settings: []
+      });
+    }
+
+    console.log('✅ Settings retrieved:', settings.length, 'records');
+
+    return res.status(200).json({
+      message: "Settings retrieved successfully",
+      settings: settings
+    });
+
+  } catch (err) {
+    console.error("❌ Get app settings error:", err);
+    res.status(500).json({
+      error: "Internal Server Error",
+      details: err.message
+    });
+  }
+};
+
 
