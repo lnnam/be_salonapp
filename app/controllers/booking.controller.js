@@ -1082,7 +1082,10 @@ exports._customer_register = async (req, res) => {
   try {
     console.log('📝 Customer registration request:', req.body);
 
-    const { fullname, email, phone, password, birthday } = req.body;
+    const { fullname, email, phone, password, birthday, dob } = req.body;
+    
+    // Accept both 'birthday' and 'dob' as parameter names
+    const dateOfBirth = birthday || dob;
 
     // Validate required fields (phone optional)
     if (!fullname || !email || !password) {
@@ -1095,7 +1098,7 @@ exports._customer_register = async (req, res) => {
     // Normalize inputs
     const normalizedEmail = String(email).trim().toLowerCase();
     const normalizedPhone = phone ? String(phone).trim() : null;
-    const normalizedBirthday = birthday ? new Date(birthday) : null;
+    const normalizedBirthday = dateOfBirth ? new Date(dateOfBirth) : null;
 
     // Hash password
     const hashedPassword = bcrypt.hashSync(password, 8);
@@ -1137,7 +1140,7 @@ exports._customer_register = async (req, res) => {
           email: normalizedEmail,
           phone: normalizedPhone,
           password: hashedPassword,
-          birthday: birthday || null
+          birthday: dateOfBirth || null
         },
         type: db.sequelize.QueryTypes.UPDATE
       });
@@ -1165,7 +1168,7 @@ exports._customer_register = async (req, res) => {
           fullname: fullname,
           email: normalizedEmail,
           phone: normalizedPhone,
-          birthday: birthday || null,
+          birthday: dateOfBirth || null,
           type: 'member'
         }
       });
@@ -1184,7 +1187,7 @@ exports._customer_register = async (req, res) => {
           email: normalizedEmail,
           phone: normalizedPhone,
           password: hashedPassword,
-          birthday: birthday || null
+          birthday: dateOfBirth || null
         },
         type: db.sequelize.QueryTypes.INSERT
       });
@@ -1214,7 +1217,7 @@ exports._customer_register = async (req, res) => {
           fullname: fullname,
           email: normalizedEmail,
           phone: normalizedPhone,
-          birthday: birthday || null,
+          birthday: dateOfBirth || null,
           type: 'member'
         }
       });
