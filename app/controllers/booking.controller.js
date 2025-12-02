@@ -1742,7 +1742,7 @@ exports._bookingweb_save = async (req, res) => {
             console.log('📧 Sent booking approval request to owner');
           } else {
             // auto-confirm path (default)
-            Promise.all([
+            await Promise.all([
               notifications.sendBookingEmail(notificationData),
               notifications.sendBookingSMS(notificationData)
             ]).then(results => {
