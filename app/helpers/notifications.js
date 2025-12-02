@@ -194,7 +194,7 @@ exports.sendBookingApprovalRequestEmail = async (bookingData) => {
 
         const backendUrl = process.env.BACKEND_URL || 'http://localhost:8080';
         const confirmUrl = `${backendUrl}/api/booking/owner/confirm?bookingkey=${bookingkey}&token=${encodeURIComponent(token || '')}`;
-        const cancelUrl = `${backendUrl}/api/booking/email-cancel?bookingkey=${bookingkey}&token=${encodeURIComponent(token || '')}`;
+        const cancelUrl = `${backendUrl}/api/booking/owner/cancel?bookingkey=${bookingkey}&token=${encodeURIComponent(token || '')}`;
         const viewUrl = `${backendUrl}/api/booking/email-view?bookingkey=${bookingkey}&token=${encodeURIComponent(token || '')}`;
 
         const buttonsHtml = `
@@ -272,12 +272,6 @@ function getActionButtons(bookingkey, token, showCancel = true, showChange = tru
             </a>
         `;
     }
-
-    buttonsHtml += `
-        <a href="${viewUrl}" style="display: inline-block; background-color: #2196F3; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin: 5px; font-weight: bold;">
-            👁️ View Details
-        </a>
-    `;
 
     buttonsHtml += '</div>';
 
@@ -445,9 +439,10 @@ exports.sendBookingModificationEmail = async (bookingData) => {
 };
 
 /**
- * Send booking cancellation email (no action buttons)
+ * Send booking cancellation email when customer cancels (from booking confirmation email)
+ * bookingData: { customeremail, customername, datetime, servicename, staffname, bookingkey }
  */
-exports.sendBookingCancellationEmail = async (bookingData) => {
+exports.sendCustomerCancelledBookingEmail = async (bookingData) => {
     if (!EMAIL_ENABLED) {
         console.log('⚠️ Email notifications are disabled');
         return { success: false, reason: 'Email notifications disabled' };
@@ -520,13 +515,19 @@ exports.sendBookingCancellationEmail = async (bookingData) => {
         };
 
         const info = await emailTransporter.sendMail(mailOptions);
-        console.log('✅ Cancellation email sent:', info.messageId);
+        console.log('✅ Customer cancellation email sent:', info.messageId);
         return { success: true, messageId: info.messageId };
     } catch (error) {
         console.error('❌ Email send error:', error);
         return { success: false, error: error.message };
     }
 };
+
+/**
+ * Backward compatibility: alias for sendCustomerCancelledBookingEmail
+ * @deprecated Use sendCustomerCancelledBookingEmail instead
+ */
+exports.sendBookingCancellationEmail = exports.sendCustomerCancelledBookingEmail;
 
 /**
  * Send booking confirmation SMS
@@ -707,5 +708,90 @@ exports.sendPasswordResetEmail = async (data) => {
     } catch (err) {
         console.error('❌ Password reset email error:', err);
         return { success: false, error: err.message };
+    }
+};
+
+/**
+ * Send booking cancellation email when owner cancels from approval request
+ * bookingData: { customeremail, customername, datetime, servicename, staffname, bookingkey }
+ */
+exports.sendOwnerCancelledBookingEmail = async (bookingData) => {
+    if (!EMAIL_ENABLED) {
+        console.log('⚠️ Email notifications are disabled');
+        return { success: false, reason: 'Email notifications disabled' };
+    }
+
+    if (!emailTransporter) {
+        console.log('⚠️ Email transporter not initialized');
+        return { success: false, reason: 'Email transporter not configured' };
+    }
+
+    try {
+        const { customeremail, customername, datetime, servicename, staffname, bookingkey } = bookingData;
+
+        if (!customeremail) {
+            console.log('⚠️ No email provided, skipping cancellation notification');
+            return { success: false, reason: 'No email provided' };
+        }
+
+        const salon = await getSalonInfo();
+
+        const logoHtml = salon.photobase64
+            ? `<img src="data:image/png;base64,${salon.photobase64}" alt="${salon.name}" style="max-width: 200px; margin-bottom: 20px;">`
+            : salon.photo
+                ? `<img src="${salon.photo}" alt="${salon.name}" style="max-width: 200px; margin-bottom: 20px;">`
+                : '';
+
+        const bookAgainUrl = `${FRONTEND_URL}/booking`;
+
+        const mailOptions = {
+            from: process.env.SMTP_FROM || `"${salon.name}" <${salon.email}>`,
+            to: customeremail,
+            subject: `Booking Cancelled - ${salon.name}`,
+            html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          ${logoHtml}
+          <h2 style="color: #F44336; border-bottom: 2px solid #F44336; padding-bottom: 10px;">
+            Booking Cancelled
+          </h2>
+          <p>Dear ${customername || 'Valued Customer'},</p>
+          <p>Unfortunately, your booking has been cancelled by ${salon.name}. We apologize for any inconvenience.</p>
+          
+          <div style="background-color: #FFEBEE; padding: 20px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #F44336;">
+            <p style="margin: 10px 0;"><strong>Booking ID:</strong> #${bookingkey}</p>
+            <p style="margin: 10px 0;"><strong>Service:</strong> ${servicename || 'N/A'}</p>
+            <p style="margin: 10px 0;"><strong>Staff:</strong> ${staffname || 'N/A'}</p>
+            <p style="margin: 10px 0;"><strong>Date & Time:</strong> ${datetime || 'N/A'}</p>
+          </div>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${bookAgainUrl}" style="display: inline-block; background-color: #4CAF50; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+                📅 Book Again
+            </a>
+          </div>
+          
+          <p style="color: #666;">
+            If you have any questions or would like to reschedule, please feel free to contact us.
+          </p>
+          
+          <p>We hope to serve you in the future!</p>
+          
+          ${salon.phone ? `<p style="color: #666;">📞 Contact us: ${salon.phone}</p>` : ''}
+          ${salon.email ? `<p style="color: #666;">📧 Email: ${salon.email}</p>` : ''}
+          
+          <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
+          <p style="color: #999; font-size: 12px; text-align: center;">
+            This is an automated message. Please do not reply directly to this email.
+          </p>
+        </div>
+      `
+        };
+
+        const info = await emailTransporter.sendMail(mailOptions);
+        console.log('✅ Owner cancellation email sent to customer:', info.messageId);
+        return { success: true, messageId: info.messageId };
+    } catch (error) {
+        console.error('❌ Owner cancellation email error:', error);
+        return { success: false, error: error.message };
     }
 };

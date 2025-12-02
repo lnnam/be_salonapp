@@ -1938,6 +1938,16 @@ exports._email_cancel_booking = async (req, res) => {
 
     console.log('✅ Booking cancelled via email:', bookingkey);
 
+    // Send cancellation email to customer
+    await notifications.sendOwnerCancelledBookingEmail({
+      customeremail: booking.customeremail,
+      customername: booking.customername,
+      datetime: booking.datetime,
+      servicename: booking.servicename,
+      staffname: booking.staffname,
+      bookingkey: bookingkey
+    });
+
     // Get salon info for success page
     const salonInfo = await db.sequelize.query(
       `SELECT name, phone, email FROM tblsalon WHERE pkey = :salonkey AND dateinactivated IS NULL LIMIT 1`,
@@ -2304,6 +2314,96 @@ exports._email_redirect_view = async (req, res) => {
   const { bookingkey, token } = req.query;
   const flutterUrl = process.env.FLUTTER_URL || 'http://localhost:3000';
   res.redirect(`${flutterUrl}/booking/view?bookingkey=${bookingkey}&token=${encodeURIComponent(token)}`);
+};
+
+// Owner cancel endpoint - cancel booking from approval email (no UI response)
+// GET /api/booking/owner/cancel?bookingkey=123&token=xyz
+exports._owner_cancel_booking = async (req, res) => {
+  try {
+    const { bookingkey, token } = req.query;
+
+    console.log('🚫 Owner cancel request:', { bookingkey });
+
+    if (!bookingkey || !token) {
+      return res.status(400).json({ error: 'Missing bookingkey or token' });
+    }
+
+    // Verify token
+    let decoded;
+    try {
+      decoded = jwt.verify(token, config.secret);
+      console.log('✅ Token verified for owner cancel:', decoded);
+    } catch (verifyErr) {
+      console.error('❌ Token verification failed:', verifyErr.message);
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
+    // Get booking details before cancellation
+    const bookingCheck = await db.sequelize.query(
+      `SELECT pkey, customerkey, datetime, bookingstart, customername, customeremail, 
+              customerphone, servicename, staffname, status
+       FROM tblbooking 
+       WHERE pkey = :bookingkey 
+         AND dateinactivated IS NULL`,
+      {
+        replacements: {
+          bookingkey: Number(bookingkey)
+        },
+        type: db.sequelize.QueryTypes.SELECT
+      }
+    );
+
+    if (!bookingCheck || bookingCheck.length === 0) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    const booking = bookingCheck[0];
+
+    if (booking.status === 'cancelled') {
+      return res.status(400).json({ error: 'Booking already cancelled' });
+    }
+
+    // Check if booking is in the past
+    const bookingTime = new Date(booking.bookingstart || booking.datetime);
+    if (bookingTime < new Date()) {
+      return res.status(400).json({ error: 'Cannot cancel past bookings' });
+    }
+
+    // Cancel the booking
+    const cancelQuery = `
+      UPDATE tblbooking
+      SET status = 'cancelled'
+      WHERE pkey = :bookingkey
+    `;
+
+    await db.sequelize.query(cancelQuery, {
+      replacements: { bookingkey: Number(bookingkey) },
+      type: db.sequelize.QueryTypes.UPDATE,
+    });
+
+    console.log('✅ Booking cancelled by owner:', bookingkey);
+
+    // Send cancellation email to customer
+    await notifications.sendOwnerCancelledBookingEmail({
+      customeremail: booking.customeremail,
+      customername: booking.customername,
+      datetime: formatDatetimeForDisplay(booking.bookingstart || booking.datetime),
+      servicename: booking.servicename,
+      staffname: booking.staffname,
+      bookingkey: bookingkey
+    });
+
+    // Return success - no HTML, just redirect back (close email or go back)
+    return res.status(200).json({
+      success: true,
+      message: 'Booking cancelled successfully. Customer has been notified.',
+      bookingkey: Number(bookingkey)
+    });
+
+  } catch (err) {
+    console.error('❌ Owner cancel booking error:', err);
+    return res.status(500).json({ error: 'Internal Server Error', details: err.message });
+  }
 };
 
 // Add new customer (public endpoint)

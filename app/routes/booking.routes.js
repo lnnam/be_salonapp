@@ -62,6 +62,7 @@ module.exports = function (app) {
   app.get("/api/booking/email-modify", controller._email_redirect_modify);
   app.get("/api/booking/email-view", controller._email_redirect_view);
   app.get("/api/booking/owner/confirm", controller._owner_confirm_booking);
+  app.get("/api/booking/owner/cancel", controller._owner_cancel_booking);
   // Owner platform confirm (authenticated)
   app.post("/api/booking/owner/confirm", verifyToken, controller._owner_confirm_booking_admin);
 
