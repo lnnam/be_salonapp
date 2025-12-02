@@ -1083,7 +1083,7 @@ exports._customer_register = async (req, res) => {
     console.log('📝 Customer registration request:', req.body);
 
     const { fullname, email, phone, password, birthday, dob } = req.body;
-    
+
     // Accept both 'birthday' and 'dob' as parameter names
     const dateOfBirth = birthday || dob;
 
@@ -1617,7 +1617,7 @@ exports._bookingweb_save = async (req, res) => {
          customeremail, customerphone,
          dateactivated, note, customername, staffname, servicename, userkey, createdby)
         VALUES 
-        (:customerkey, :servicekey, :staffkey, CURDATE(), NOW(), :bookingstart, :bookingend, 
+        (:customerkey, :servicekey, :staffkey, DATE(:datetime), :datetime, :bookingstart, :bookingend, 
          :customeremail, :customerphone,
          NOW(), :note, :customername, :staffname, :servicename, :userkey, 'customer')
       `;
@@ -1629,6 +1629,7 @@ exports._bookingweb_save = async (req, res) => {
           staffkey,
           customeremail,
           customerphone,
+          datetime: bookingStart,
           bookingstart: bookingStart,
           bookingend: bookingEndStr,
           note,
