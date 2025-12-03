@@ -251,7 +251,7 @@ function getActionButtons(bookingkey, token, showCancel = true, showChange = tru
     // ✅ Cancel button goes directly to backend (no confirmation needed)
     const cancelUrl = `${backendUrl}/api/booking/email-cancel?bookingkey=${bookingkey}&token=${encodeURIComponent(token)}`;
 
-    // Change and view redirect to Flutter app
+    // Change and view redirect through backend to frontend
     const changeUrl = `${backendUrl}/api/booking/email-modify?bookingkey=${bookingkey}&token=${encodeURIComponent(token)}`;
     const viewUrl = `${backendUrl}/api/booking/email-view?bookingkey=${bookingkey}&token=${encodeURIComponent(token)}`;
 

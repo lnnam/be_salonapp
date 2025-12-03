@@ -2302,15 +2302,167 @@ exports._owner_confirm_booking_admin = async (req, res) => {
 
 // Email redirect handlers for modify and view
 exports._email_redirect_modify = async (req, res) => {
-  const { bookingkey, token } = req.query;
-  const flutterUrl = process.env.FLUTTER_URL || 'http://localhost:3000';
-  res.redirect(`${flutterUrl}/booking/modify?bookingkey=${bookingkey}&token=${encodeURIComponent(token)}`);
+  try {
+    const { bookingkey, token } = req.query;
+
+    if (!bookingkey || !token) {
+      return res.status(400).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Error - Missing Information</title>
+          <style>
+            body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+            .error { color: #F44336; font-size: 24px; margin: 20px 0; }
+            .message { color: #666; margin: 20px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="error">❌ Error</div>
+          <div class="message">Missing booking information. Please use the link from your email.</div>
+        </body>
+        </html>
+      `);
+    }
+
+    // Verify token
+    try {
+      jwt.verify(token, config.secret);
+      console.log('✅ Token verified for email modify redirect');
+    } catch (verifyErr) {
+      console.error('❌ Token verification failed:', verifyErr.message);
+      return res.status(401).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Error - Invalid Link</title>
+          <style>
+            body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+            .error { color: #F44336; font-size: 24px; margin: 20px 0; }
+            .message { color: #666; margin: 20px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="error">❌ Invalid or Expired Link</div>
+          <div class="message">This modification link is no longer valid. Please contact us directly.</div>
+        </body>
+        </html>
+      `);
+    }
+
+    // Redirect to frontend
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const redirectUrl = frontendUrl;
+    console.log('🔗 Redirecting to modify page:', redirectUrl);
+    res.redirect(redirectUrl);
+  } catch (err) {
+    console.error('❌ Email redirect modify error:', err);
+    res.status(500).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Error</title>
+        <style>
+          body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+          .error { color: #F44336; font-size: 24px; margin: 20px 0; }
+          .message { color: #666; margin: 20px 0; }
+        </style>
+      </head>
+      <body>
+        <div class="error">❌ Error</div>
+        <div class="message">An error occurred. Please contact us.</div>
+      </body>
+      </html>
+    `);
+  }
 };
 
 exports._email_redirect_view = async (req, res) => {
-  const { bookingkey, token } = req.query;
-  const flutterUrl = process.env.FLUTTER_URL || 'http://localhost:3000';
-  res.redirect(`${flutterUrl}/booking/view?bookingkey=${bookingkey}&token=${encodeURIComponent(token)}`);
+  try {
+    const { bookingkey, token } = req.query;
+
+    if (!bookingkey || !token) {
+      return res.status(400).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Error - Missing Information</title>
+          <style>
+            body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+            .error { color: #F44336; font-size: 24px; margin: 20px 0; }
+            .message { color: #666; margin: 20px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="error">❌ Error</div>
+          <div class="message">Missing booking information. Please use the link from your email.</div>
+        </body>
+        </html>
+      `);
+    }
+
+    // Verify token
+    try {
+      jwt.verify(token, config.secret);
+      console.log('✅ Token verified for email view redirect');
+    } catch (verifyErr) {
+      console.error('❌ Token verification failed:', verifyErr.message);
+      return res.status(401).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Error - Invalid Link</title>
+          <style>
+            body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+            .error { color: #F44336; font-size: 24px; margin: 20px 0; }
+            .message { color: #666; margin: 20px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="error">❌ Invalid or Expired Link</div>
+          <div class="message">This booking view link is no longer valid. Please contact us directly.</div>
+        </body>
+        </html>
+      `);
+    }
+
+    // Redirect to frontend
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const redirectUrl = frontendUrl;
+    console.log('🔗 Redirecting to view page:', redirectUrl);
+    res.redirect(redirectUrl);
+  } catch (err) {
+    console.error('❌ Email redirect view error:', err);
+    res.status(500).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Error</title>
+        <style>
+          body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+          .error { color: #F44336; font-size: 24px; margin: 20px 0; }
+          .message { color: #666; margin: 20px 0; }
+        </style>
+      </head>
+      <body>
+        <div class="error">❌ Error</div>
+        <div class="message">An error occurred. Please contact us.</div>
+      </body>
+      </html>
+    `);
+  }
 };
 
 // Owner cancel endpoint - cancel booking from approval email (no UI response)
