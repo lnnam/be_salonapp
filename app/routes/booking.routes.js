@@ -64,7 +64,7 @@ module.exports = function (app) {
   app.get("/api/booking/owner/confirm", controller._owner_confirm_booking);
   app.get("/api/booking/owner/cancel", controller._owner_cancel_booking);
   // Owner platform confirm (authenticated)
-  app.post("/api/booking/owner/confirm", verifyToken, controller._owner_confirm_booking_admin);
+  //app.post("/api/booking/owner/confirm", verifyToken, controller._owner_confirm_booking_admin);
 
   // Customer management endpoints (public)
   app.post("/api/booking/customer/add", controller._add_customer);

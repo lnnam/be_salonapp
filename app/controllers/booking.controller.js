@@ -2216,7 +2216,7 @@ exports._owner_confirm_booking = async (req, res) => {
 // Owner confirm endpoint for owner platform (authenticated)
 // POST /api/booking/owner/confirm
 // Body: { bookingkey }
-exports._owner_confirm_booking_admin = async (req, res) => {
+/* exports._owner_confirm_booking_admin = async (req, res) => {
   try {
     const { bookingkey } = req.body;
 
@@ -2298,7 +2298,7 @@ exports._owner_confirm_booking_admin = async (req, res) => {
     console.error('❌ Owner (admin) confirm error:', err);
     return res.status(500).json({ error: 'Internal Server Error', details: err.message });
   }
-};
+}; */
 
 // Email redirect handlers for modify and view
 exports._email_redirect_modify = async (req, res) => {
