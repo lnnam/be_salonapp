@@ -241,9 +241,6 @@ exports._booking_save = async (req, res) => {
       }
 
 
-
-
-
       // ✅ Fetch customer email and phone from tblcustomer
       const customerInfo = await db.sequelize.query(
         "SELECT email, phone, fullname FROM tblcustomer WHERE pkey = :customerkey LIMIT 1",
@@ -2393,16 +2390,88 @@ exports._owner_cancel_booking = async (req, res) => {
       bookingkey: bookingkey
     });
 
-    // Return success - no HTML, just redirect back (close email or go back)
-    return res.status(200).json({
-      success: true,
-      message: 'Booking cancelled successfully. Customer has been notified.',
-      bookingkey: Number(bookingkey)
-    });
+    // Return a friendly HTML success page with actions
+    return res.status(200).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Booking Cancelled</title>
+        <style>
+          body { font-family: Arial, sans-serif; background: #f5f7fb; color: #333; }
+          .container { max-width: 600px; margin: 60px auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,0.08); text-align: center; }
+          .title { font-size: 28px; color: #F44336; margin-bottom: 10px; }
+          .message { margin: 20px 0; color: #555; }
+          .buttons a { display: inline-block; margin: 8px; padding: 12px 20px; border-radius: 6px; text-decoration: none; color: white; font-weight: 600; }
+          .btn-back { background: #616161; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="title">✅ Booking Cancelled</div>
+          <div class="message">Booking #${bookingkey} has been cancelled successfully.</div>
+          <div class="message" style="font-size: 14px; color: #666;">Customer has been notified via email.</div>
+          <div class="buttons">
+            <a class="btn-back" href="#" onclick="window.close();return false;">Back to Email</a>
+          </div>
+          <p style="margin-top:20px;color:#999;font-size:13px;">If the "Back to Email" button does not close automatically, you'll be redirected shortly.</p>
+        </div>
+
+        <script>
+          (function(){
+            // Try to close the window immediately (works when opened by script)
+            try { window.close(); } catch(e) {}
+            // If window is still open after 800ms, redirect to email inbox or go back
+            setTimeout(function(){
+              try {
+                // If window was not closed, go back to previous page
+                if (!window.closed) {
+                  window.history.back();
+                }
+              } catch (e) {
+                // fallback: close window
+                window.close();
+              }
+            }, 800);
+          })();
+        </script>
+      </body>
+      </html>
+    `);
 
   } catch (err) {
     console.error('❌ Owner cancel booking error:', err);
-    return res.status(500).json({ error: 'Internal Server Error', details: err.message });
+    return res.status(500).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Error</title>
+        <style>
+          body { font-family: Arial, sans-serif; background: #f5f7fb; color: #333; }
+          .container { max-width: 600px; margin: 60px auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,0.08); text-align: center; }
+          .title { font-size: 28px; color: #F44336; margin-bottom: 10px; }
+          .message { margin: 20px 0; color: #555; }
+          .btn-back { display: inline-block; margin: 8px; padding: 12px 20px; border-radius: 6px; text-decoration: none; color: white; font-weight: 600; background: #616161; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="title">❌ Error</div>
+          <div class="message">An error occurred while cancelling the booking. Please try again.</div>
+          <a class="btn-back" href="#" onclick="window.close();return false;">Back to Email</a>
+        </div>
+
+        <script>
+          setTimeout(function(){
+            try { if (!window.closed) { window.history.back(); } } catch(e) { window.close(); }
+          }, 800);
+        </script>
+      </body>
+      </html>
+    `);
   }
 };
 
