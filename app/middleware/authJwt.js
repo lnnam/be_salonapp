@@ -6,10 +6,12 @@ const User = db.user;
 verifyToken = (req, res, next) => {
   // let token = req.headers["x-access-token"];
   const token = req.headers['authorization'];
+  console.log('🔐 verifyToken middleware - token:', token ? 'present' : 'missing');
 
   //const token = req.headers['authorization'].split(' ')[1];
 
   if (!token) {
+    console.log('❌ No token provided');
     return res.status(403).send({
       message: "Unauthorized: No token provided"
     });
@@ -19,10 +21,12 @@ verifyToken = (req, res, next) => {
     config.secret,
     (err, decoded) => {
       if (err) {
+        console.log('❌ Token verification failed:', err.message);
         return res.status(401).send({
           message: 'Unauthorized: Invalid token',
         });
       }
+      console.log('✅ Token verified successfully');
       req.user = decoded;
       next();
     });

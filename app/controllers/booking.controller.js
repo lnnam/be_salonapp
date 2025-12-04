@@ -28,6 +28,7 @@ function formatDatetimeForDisplay(mysqlDatetime) {
   }
 }
 
+
 exports._booking_list = async (req, res) => {
   try {
     const objstore = await db.sequelize.query("call spListCurrentBooking()");
@@ -36,6 +37,39 @@ exports._booking_list = async (req, res) => {
   catch (err) {
     res.status(500).send({ error: err.message });
   }
+
+}
+
+
+exports._booking_list_owner = async (req, res) => {
+  try {
+    // Extract optional query parameter, default to null if not provided
+    const { opt } = req.query;
+    const optValue = opt || null;
+
+    console.log('📋 Fetching bookings with option:', optValue);
+
+    // Call stored procedure with optional parameter
+    const query = `call spOwnerListBooking(:opt)`;
+    console.log('📝 Template query:', query);
+    console.log('📝 Replacements:', { opt: optValue });
+
+    // Manually build the full query to show what will be executed
+    const fullQuery = query.replace(':opt', optValue !== null ? `'${optValue}'` : 'NULL');
+    console.log('📝 Full formatted query:', fullQuery);
+
+    const result = await db.sequelize.query(query, {
+      replacements: { opt: optValue }
+    });
+    console.log(`✅ Found ${result.length} bookings`);
+    console.log('📦 Data returned from stored procedure:', JSON.stringify(result, null, 2));
+    res.status(200).send(result);
+  }
+  catch (err) {
+    console.error('❌ Booking list error:', err.message);
+    res.status(500).send({ error: err.message });
+  }
+
 
 }
 
@@ -2768,5 +2802,4 @@ exports._get_app_setting = async (req, res) => {
     });
   }
 };
-
 
