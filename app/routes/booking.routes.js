@@ -44,6 +44,7 @@ module.exports = function (app) {
   // Protected customer endpoints (token required)
   app.get("/api/booking/customer/profile", controller._customer_profile);
   app.get("/api/booking/customer/bookings", controller._customer_bookings);
+  app.get("/api/booking/customer/list", controller._booking_listcustomer);
   app.post("/api/booking/customer/cancel", controller._customer_cancel_booking);
   app.post("/api/booking/cancel", controller._customer_cancel_booking); // Alias
 

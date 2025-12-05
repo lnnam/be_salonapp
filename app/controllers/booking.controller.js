@@ -117,7 +117,7 @@ exports._booking_service = async (req, res) => {
 
 exports._booking_listcustomer = async (req, res) => {
   try {
-    const objstore = await db.sequelize.query("select pkey, fullname, phone , photo from tblcustomer where dateinactivated is null", {
+    const objstore = await db.sequelize.query("select pkey, fullname, phone , email from tblcustomer where dateinactivated is null", {
       type: db.sequelize.QueryTypes.SELECT,
     });
     res.status(200).send(objstore);
