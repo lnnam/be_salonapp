@@ -53,4 +53,6 @@ startServer(DEFAULT_PORT);
 
 require('./app/routes/auth.routes')(app);
 require('./app/routes/booking.routes')(app);
+require('./app/routes/contact.routes')(app);
+
 

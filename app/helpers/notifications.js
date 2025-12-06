@@ -795,3 +795,114 @@ exports.sendOwnerCancelledBookingEmail = async (bookingData) => {
         return { success: false, error: error.message };
     }
 };
+
+/**
+ * Send contact/message from customer to salon
+ * Used for contact form submissions
+ * messageData: { name, email, phone, message }
+ */
+exports.sendContactMessageEmail = async (messageData) => {
+    if (!EMAIL_ENABLED) {
+        console.log('⚠️ Email notifications are disabled');
+        return { success: false, reason: 'Email notifications disabled' };
+    }
+
+    if (!emailTransporter) {
+        console.log('⚠️ Email transporter not initialized');
+        return { success: false, reason: 'Email transporter not configured' };
+    }
+
+    try {
+        const { name, email, phone, message } = messageData;
+
+        // Validate required fields
+        if (!name || !email || !message) {
+            console.log('⚠️ Missing required contact form fields');
+            return { success: false, reason: 'Missing required fields: name, email, message' };
+        }
+
+        const salon = await getSalonInfo();
+
+        const logoHtml = salon.photobase64
+            ? `<img src="data:image/png;base64,${salon.photobase64}" alt="${salon.name}" style="max-width: 200px; margin-bottom: 20px;">`
+            : salon.photo
+                ? `<img src="${salon.photo}" alt="${salon.name}" style="max-width: 200px; margin-bottom: 20px;">`
+                : '';
+
+        // Email to salon owner
+        const mailToSalon = {
+            from: process.env.SMTP_FROM || `"${salon.name}" <${salon.email}>`,
+            to: salon.email,
+            subject: `New Contact Message from ${name}`,
+            html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          ${logoHtml}
+          <h2 style="color: #333; border-bottom: 2px solid #4CAF50; padding-bottom: 10px;">
+            New Contact Message
+          </h2>
+          
+          <div style="background-color: #f5f5f5; padding: 20px; border-radius: 5px; margin: 20px 0;">
+            <p style="margin: 10px 0;"><strong>Name:</strong> ${name}</p>
+            <p style="margin: 10px 0;"><strong>Email:</strong> ${email}</p>
+            ${phone ? `<p style="margin: 10px 0;"><strong>Phone:</strong> ${phone}</p>` : ''}
+            <hr style="margin: 15px 0; border: none; border-top: 1px solid #ddd;">
+            <p style="margin: 10px 0;"><strong>Message:</strong></p>
+            <p style="white-space: pre-wrap; color: #333;">${message}</p>
+          </div>
+
+          <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
+          <p style="color: #999; font-size: 12px; text-align: center;">
+            This message was received from your website contact form.
+          </p>
+        </div>
+      `
+        };
+
+        // Send email to salon
+        const info = await emailTransporter.sendMail(mailToSalon);
+        console.log('✅ Contact message email sent to salon:', info.messageId);
+
+        // Optional: Send confirmation email to customer
+        const mailToCustomer = {
+            from: process.env.SMTP_FROM || `"${salon.name}" <${salon.email}>`,
+            to: email,
+            subject: `Message Received - ${salon.name}`,
+            html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          ${logoHtml}
+          <h2 style="color: #333; border-bottom: 2px solid #4CAF50; padding-bottom: 10px;">
+            Thank You For Contacting Us
+          </h2>
+          <p>Dear ${name},</p>
+          <p>Thank you for reaching out to ${salon.name}! We have received your message and will get back to you as soon as possible.</p>
+          
+          <div style="background-color: #f5f5f5; padding: 20px; border-radius: 5px; margin: 20px 0;">
+            <p style="margin: 10px 0;"><strong>Your Message:</strong></p>
+            <p style="white-space: pre-wrap; color: #333;">${message}</p>
+          </div>
+
+          <div style="background-color: #e8f5e9; padding: 20px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #4CAF50;">
+            <p style="margin: 5px 0; color: #2e7d32;"><strong>Contact Details:</strong></p>
+            ${salon.phone ? `<p style="margin: 5px 0; color: #333;">📱 ${salon.phone}</p>` : ''}
+            ${salon.email ? `<p style="margin: 5px 0; color: #333;">📧 ${salon.email}</p>` : ''}
+          </div>
+
+          <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
+          <p style="color: #999; font-size: 12px; text-align: center;">
+            This is an automated confirmation message.
+          </p>
+        </div>
+      `
+        };
+
+        // Send confirmation to customer (don't wait, non-critical)
+        emailTransporter.sendMail(mailToCustomer).catch(err => {
+            console.warn('⚠️ Failed to send confirmation email to customer:', err.message);
+        });
+
+        return { success: true, messageId: info.messageId };
+    } catch (error) {
+        console.error('❌ Contact message email error:', error);
+        return { success: false, error: error.message };
+    }
+};
