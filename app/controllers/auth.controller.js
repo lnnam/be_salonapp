@@ -13,8 +13,8 @@ exports._token_encode = (userkey, username, salonkey) => {
     config.secret,
     {
       algorithm: 'HS256',
-      allowInsecureKeySizes: true,
-      expiresIn: 86400, // 24 hours
+      allowInsecureKeySizes: true
+      // No expiresIn: session never expires
     });
 }
 
