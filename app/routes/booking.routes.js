@@ -57,6 +57,7 @@ module.exports = function (app) {
 
   // Protected customer endpoints 
   app.get("/api/booking/setting", controller._get_app_setting);
+  app.post("/api/booking/setting/update", verifyToken, controller._update_app_setting);
 
   // Email action endpoints (with token authentication)
   app.get("/api/booking/email-cancel", controller._email_cancel_booking);

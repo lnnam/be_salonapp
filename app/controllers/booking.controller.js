@@ -2803,3 +2803,74 @@ exports._get_app_setting = async (req, res) => {
   }
 };
 
+exports._update_app_setting = async (req, res) => {
+  try {
+    console.log('⚙️ Update app settings request');
+    console.log('Request body:', req.body);
+
+    const {
+      pkey,
+      num_staff_for_autobooking,
+      onoff,
+      sundayoff,
+      autoconfirm,
+      listoffday,
+      listhouroff
+    } = req.body;
+
+    // Validate pkey is provided
+    if (!pkey) {
+      return res.status(400).json({
+        error: "Validation Error",
+        message: "pkey is required"
+      });
+    }
+
+    // Build update fields - only these 6 fields are allowed
+    const updateFields = {};
+    if (num_staff_for_autobooking !== undefined) updateFields.num_staff_for_autobooking = num_staff_for_autobooking;
+    if (onoff !== undefined) updateFields.onoff = onoff;
+    if (sundayoff !== undefined) updateFields.sundayoff = sundayoff;
+    if (autoconfirm !== undefined) updateFields.autoconfirm = autoconfirm;
+    if (listoffday !== undefined) updateFields.listoffday = listoffday;
+    if (listhouroff !== undefined) updateFields.listhouroff = listhouroff;
+
+    // If no fields to update, return error
+    if (Object.keys(updateFields).length === 0) {
+      return res.status(400).json({
+        error: "Validation Error",
+        message: "No fields to update"
+      });
+    }
+
+    // Build the UPDATE query
+    const setClauses = Object.keys(updateFields).map(key => `${key} = ?`).join(', ');
+    const values = Object.values(updateFields);
+    values.push(pkey); // Add pkey as the last parameter for WHERE clause
+
+    const query = `UPDATE tblsetting SET ${setClauses} WHERE pkey = ?`;
+
+    console.log('Query:', query);
+    console.log('Values:', values);
+
+    const result = await db.sequelize.query(query, {
+      replacements: values,
+      type: db.sequelize.QueryTypes.UPDATE
+    });
+
+    console.log('✅ Settings updated successfully');
+
+    return res.status(200).json({
+      message: "Settings updated successfully",
+      pkey: pkey
+    });
+
+  } catch (err) {
+    console.error("❌ Update app settings error:", err);
+    res.status(500).json({
+      error: "Internal Server Error",
+      details: err.message
+    });
+  }
+};
+
