@@ -2814,6 +2814,7 @@ exports._update_app_setting = async (req, res) => {
       onoff,
       sundayoff,
       autoconfirm,
+      aicheck,
       listoffday,
       listhouroff
     } = req.body;
@@ -2832,6 +2833,9 @@ exports._update_app_setting = async (req, res) => {
     if (onoff !== undefined) updateFields.onoff = onoff;
     if (sundayoff !== undefined) updateFields.sundayoff = sundayoff;
     if (autoconfirm !== undefined) updateFields.autoconfirm = autoconfirm;
+      // Convert "yes"/"no" strings to boolean (1/0)
+      const aiValue = String(aicheck).toLowerCase();
+      updateFields.ai_check = aiValue === 'no' ? 'no' : 'yes';
     if (listoffday !== undefined) updateFields.listoffday = listoffday;
     if (listhouroff !== undefined) updateFields.listhouroff = listhouroff;
 
