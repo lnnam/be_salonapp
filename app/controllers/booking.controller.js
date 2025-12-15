@@ -355,7 +355,6 @@ exports._booking_save = async (req, res) => {
         // fallback to string compare
         timeChanged = existingBookingStart && String(existingBookingStart) !== String(bookingStart);
       }
-      if (timeChanged) console.log('⏰ Booking time changed (web) for pkey=', newBookingKey);
 
 
 
@@ -394,21 +393,7 @@ exports._booking_save = async (req, res) => {
         try {
           const settings = await notifications.getBookingSettings();
           console.log('🔧 Booking settings loaded (update):', settings);
-          if (timeChanged && settings && settings.autoconfirm === false) {
-            // mark booking as pending and notify owner for approval
-            const pendingResult = await db.sequelize.query(
-              "UPDATE tblbooking SET status = 'pending' WHERE pkey = :pkey",
-              { replacements: { pkey: Number(newBookingKey) }, type: db.sequelize.QueryTypes.UPDATE }
-            );
-
-            // Log pending update result
-            console.log('⏳ Booking marked as pending (update) result:', pendingResult);
-
-            // Send approval request to owner
-            await notifications.sendBookingApprovalRequestEmail(notificationData);
-            console.log('📧 Sent booking approval request to owner (update)');
-          } else {
-            // No time change or auto-confirm enabled — send modification notifications to customer
+        
             Promise.all([
               notifications.sendBookingModificationEmail(notificationData),
               notifications.sendBookingModificationSMS(notificationData)
@@ -417,7 +402,6 @@ exports._booking_save = async (req, res) => {
             }).catch(err => {
               console.error('⚠️ Modification notification error (non-critical):', err);
             });
-          }
         } catch (e) {
           console.error('❌ Error handling auto-confirm setting for update:', e);
           // fallback: send modification notifications
@@ -1346,6 +1330,7 @@ exports._bookingweb_save = async (req, res) => {
     // ✅ Only resolve/create customer for NEW bookings
     if (!isUpdating && !resolvedCustomerKey) {
       const phone = customerphone ? String(customerphone).trim() : null;
+      const fullname = customername ? String(customername).trim() : null;
       const email = customeremail ? String(customeremail).trim().toLowerCase() : null;
 
       if (phone) {
@@ -1371,6 +1356,13 @@ exports._bookingweb_save = async (req, res) => {
               await db.sequelize.query(
                 "UPDATE tblcustomer SET phone = :phone WHERE pkey = :pkey",
                 { replacements: { phone, pkey: resolvedCustomerKey }, type: db.sequelize.QueryTypes.UPDATE }
+              );
+              console.log('✅ Updated existing customer phone for pkey:', resolvedCustomerKey);
+            }
+             if (fullname) {
+              await db.sequelize.query(
+                "UPDATE tblcustomer SET fullname = :fullname WHERE pkey = :pkey",
+                { replacements: { fullname, pkey: resolvedCustomerKey }, type: db.sequelize.QueryTypes.UPDATE }
               );
               console.log('✅ Updated existing customer phone for pkey:', resolvedCustomerKey);
             }
