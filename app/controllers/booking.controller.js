@@ -393,15 +393,15 @@ exports._booking_save = async (req, res) => {
         try {
           const settings = await notifications.getBookingSettings();
           console.log('🔧 Booking settings loaded (update):', settings);
-        
-            Promise.all([
-              notifications.sendBookingModificationEmail(notificationData),
-              notifications.sendBookingModificationSMS(notificationData)
-            ]).then(results => {
-              console.log('📬 Modification notification results:', results);
-            }).catch(err => {
-              console.error('⚠️ Modification notification error (non-critical):', err);
-            });
+
+          Promise.all([
+            notifications.sendBookingModificationEmail(notificationData),
+            notifications.sendBookingModificationSMS(notificationData)
+          ]).then(results => {
+            console.log('📬 Modification notification results:', results);
+          }).catch(err => {
+            console.error('⚠️ Modification notification error (non-critical):', err);
+          });
         } catch (e) {
           console.error('❌ Error handling auto-confirm setting for update:', e);
           // fallback: send modification notifications
@@ -937,6 +937,60 @@ exports._customer_bookings = async (req, res) => {
   }
 };
 
+
+exports._getavailability_owner = async (req, res) => {
+  try {
+    const { date } = req.query;
+
+    // ✅ Default values
+    const p_date = date || new Date().toISOString().split("T")[0];
+
+    // ✅ Execute stored procedure
+    const result = await db.sequelize.query(
+      "CALL getAvailability_Owner(:date)",
+      {
+        replacements: {
+          date: p_date,
+        },
+      }
+    );
+
+    // ⚙️ Handle possible shapes
+    let rows;
+    if (Array.isArray(result)) {
+      if (Array.isArray(result[0])) rows = result[0]; // [[...]]
+      else rows = result; // [...]
+    } else if (typeof result === "object") {
+      // sometimes Sequelize returns {0: [...], meta: {...}}
+      rows = Array.isArray(result[0]) ? result[0] : Object.values(result).find(Array.isArray);
+    }
+
+    if (!Array.isArray(rows)) {
+      console.error("Unexpected SQL result:", result);
+      return res.status(500).json({ error: "Unexpected SQL return format" });
+    }
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "No availability found" });
+    }
+
+    // ✅ Format rows
+    const formatted = rows.map(r => ({
+      date: r.date,
+      slot_time: r.slot_time,
+      count: typeof r.count === 'number' ? r.count : Number(r.count) || 0,
+    }));
+
+    res.json({
+      date: p_date,
+      slots: formatted,
+    });
+  } catch (error) {
+    console.error("❌ getAvailability error:", error);
+    res.status(500).json({ error: error.message });
+  }
+}
+
 exports._getavailability = async (req, res) => {
   try {
     const { date, staffkey } = req.query;
@@ -999,7 +1053,7 @@ exports._getavailability = async (req, res) => {
     console.error("❌ getAvailability error:", error);
     res.status(500).json({ error: error.message });
   }
-};
+}
 
 // Register or update a customer (member) via API
 // POST /api/booking/customer/register-member
@@ -1359,7 +1413,7 @@ exports._bookingweb_save = async (req, res) => {
               );
               console.log('✅ Updated existing customer phone for pkey:', resolvedCustomerKey);
             }
-             if (fullname) {
+            if (fullname) {
               await db.sequelize.query(
                 "UPDATE tblcustomer SET fullname = :fullname WHERE pkey = :pkey",
                 { replacements: { fullname, pkey: resolvedCustomerKey }, type: db.sequelize.QueryTypes.UPDATE }
@@ -2825,9 +2879,9 @@ exports._update_app_setting = async (req, res) => {
     if (onoff !== undefined) updateFields.onoff = onoff;
     if (sundayoff !== undefined) updateFields.sundayoff = sundayoff;
     if (autoconfirm !== undefined) updateFields.autoconfirm = autoconfirm;
-      // Convert "yes"/"no" strings to boolean (1/0)
-      const aiValue = String(aicheck).toLowerCase();
-      updateFields.ai_check = aiValue === 'no' ? 'no' : 'yes';
+    // Convert "yes"/"no" strings to boolean (1/0)
+    const aiValue = String(aicheck).toLowerCase();
+    updateFields.ai_check = aiValue === 'no' ? 'no' : 'yes';
     if (listoffday !== undefined) updateFields.listoffday = listoffday;
     if (listhouroff !== undefined) updateFields.listhouroff = listhouroff;
 

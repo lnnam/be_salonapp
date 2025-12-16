@@ -40,6 +40,9 @@ module.exports = function (app) {
   app.get("/api/booking/staff", controller._booking_staff);
   app.get("/api/booking/service", controller._booking_service);
   app.get("/api/booking/getavailability", controller._getavailability);
+  app.get("/api/booking/getavailability/owner", verifyToken, controller._getavailability_owner);
+
+
 
   // Protected customer endpoints (token required)
   app.get("/api/booking/customer/profile", controller._customer_profile);
