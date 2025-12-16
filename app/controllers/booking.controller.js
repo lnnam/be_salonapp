@@ -978,7 +978,7 @@ exports._getavailability_owner = async (req, res) => {
     const formatted = rows.map(r => ({
       date: r.date,
       slot_time: r.slot_time,
-      count: typeof r.count === 'number' ? r.count : Number(r.count) || 0,
+      count: r.count ? Number(r.count) || 0 : 0,
     }));
 
     res.json({
