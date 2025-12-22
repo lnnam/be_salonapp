@@ -469,7 +469,7 @@ exports.sendCustomerCancelledBookingEmail = async (bookingData) => {
                 ? `<img src="${salon.photo}" alt="${salon.name}" style="max-width: 200px; margin-bottom: 20px;">`
                 : '';
 
-        const bookAgainUrl = `${FRONTEND_URL}/booking`;
+        const bookAgainUrl = `${FRONTEND_URL}`;
 
         const mailOptions = {
             from: process.env.SMTP_FROM || `"${salon.name}" <${salon.email}>`,
@@ -742,7 +742,7 @@ exports.sendOwnerCancelledBookingEmail = async (bookingData) => {
                 ? `<img src="${salon.photo}" alt="${salon.name}" style="max-width: 200px; margin-bottom: 20px;">`
                 : '';
 
-        const bookAgainUrl = `${FRONTEND_URL}/booking`;
+        const bookAgainUrl = `${FRONTEND_URL}`;
 
         const mailOptions = {
             from: process.env.SMTP_FROM || `"${salon.name}" <${salon.email}>`,
