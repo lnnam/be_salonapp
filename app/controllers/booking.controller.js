@@ -62,7 +62,7 @@ exports._booking_list_owner = async (req, res) => {
       replacements: { opt: optValue }
     });
     console.log(`✅ Found ${result.length} bookings`);
-    console.log('📦 Data returned from stored procedure:', JSON.stringify(result, null, 2));
+    // console.log('📦 Data returned from stored procedure:', JSON.stringify(result, null, 2));
     res.status(200).send(result);
   }
   catch (err) {
@@ -430,7 +430,7 @@ exports._booking_save = async (req, res) => {
          customeremail, customerphone,
          dateactivated, note, customername, staffname, servicename, userkey, createdby)
         VALUES 
-        (:customerkey, :servicekey, :staffkey, CURDATE(), NOW(), :bookingstart, :bookingend, 
+        (:customerkey, :servicekey, :staffkey,  DATE(:datetime), :datetime, :bookingstart, :bookingend, 
          :customeremail, :customerphone,
          NOW(), :note, :customername, :staffname, :servicename, :userkey, 'salon')
       `;
@@ -442,6 +442,7 @@ exports._booking_save = async (req, res) => {
           staffkey,
           customeremail,
           customerphone,
+          datetime: bookingStart,
           bookingstart: bookingStart,
           bookingend: bookingEndStr,
           note,
@@ -1008,13 +1009,12 @@ exports._getavailability = async (req, res) => {
 
     // ✅ Execute stored procedure
     const result = await db.sequelize.query(
-      "CALL getAvailability(:date, :staffkey, :slotDuration, :serviceDuration)",
+      "CALL getAvailability_v3(:date, :staffkey)",
       {
         replacements: {
           date: p_date,
           staffkey: p_staffkey,
-          slotDuration: 15,
-          serviceDuration: 45,
+
         },
       }
     );
