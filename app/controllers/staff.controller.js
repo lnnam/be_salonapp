@@ -43,7 +43,7 @@ exports.addstaff = async (req, res) => {
 exports.liststaff = async (req, res) => {
     try {
         const staff = await db.sequelize.query(
-            `SELECT pkey, fullname, phone, email, birthday, photo, location, username, dateinactivated as datelastactivated 
+            `SELECT pkey, fullname, phone, email, birthday, photobase64, location, username, dateinactivated as datelastactivated 
        FROM tblstaff 
        WHERE 1
        ORDER BY fullname ASC`,

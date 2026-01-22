@@ -1,4 +1,4 @@
-const { verifySignUp } = require("../middleware");
+const { authJwt, verifySignUp } = require("../middleware");
 const controller = require("../controllers/common.controller");
 const verifyToken = authJwt.verifyToken;
 
@@ -9,9 +9,8 @@ const allowedOrigins = [
 ];
 
 
-  module.exports = function (app) {
- 
-      app.get("/api/getdata", verifyToken, controller.callstore);
+module.exports = function (app) {
 
-  };
-  
+  app.get("/api/getdata", verifyToken, controller.callstore);
+
+};
