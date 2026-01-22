@@ -14,13 +14,13 @@ exports.addstaff = async (req, res) => {
         // Insert staff into tblstaff
         const result = await db.sequelize.query(
             `INSERT INTO tblstaff (fullname, phone, email, birthday, dateactivated) 
-       VALUES (:fullname, :phone, :email, :dob, NOW())`,
+       VALUES (:fullname, :phone, :email, :birthday, NOW())`,
             {
                 replacements: {
                     fullname: String(fullname).trim(),
                     phone: String(phone).trim(),
                     email: String(email).trim().toLowerCase(),
-                    dob: dob || null
+                    birthday: birthday || null
                 },
                 type: db.sequelize.QueryTypes.INSERT
             }
@@ -32,7 +32,7 @@ exports.addstaff = async (req, res) => {
             fullname,
             phone,
             email,
-            dob
+            birthday
         });
     } catch (err) {
         console.error("Error adding staff:", err);
@@ -43,9 +43,9 @@ exports.addstaff = async (req, res) => {
 exports.liststaff = async (req, res) => {
     try {
         const staff = await db.sequelize.query(
-            `SELECT pkey, fullname, phone, email, birthday, photo, location, username, datelastactivated 
+            `SELECT pkey, fullname, phone, email, birthday, photo, location, username, dateinactivated as datelastactivated 
        FROM tblstaff 
-       WHERE dateinactivated IS NULL 
+       WHERE 1
        ORDER BY fullname ASC`,
             {
                 type: db.sequelize.QueryTypes.SELECT
@@ -64,7 +64,7 @@ exports.getstaff = async (req, res) => {
         const { pkey } = req.params;
 
         const staff = await db.sequelize.query(
-            `SELECT * FROM tblstaff WHERE pkey = :pkey AND dateinactivated IS NULL`,
+            `SELECT * FROM tblstaff WHERE pkey = :pkey `,
             {
                 replacements: { pkey },
                 type: db.sequelize.QueryTypes.SELECT
@@ -89,7 +89,7 @@ exports.updatestaff = async (req, res) => {
 
         // Check if staff exists
         const existingStaff = await db.sequelize.query(
-            `SELECT pkey FROM tblstaff WHERE pkey = :pkey AND dateinactivated IS NULL`,
+            `SELECT pkey FROM tblstaff WHERE pkey = :pkey `,
             {
                 replacements: { pkey },
                 type: db.sequelize.QueryTypes.SELECT
@@ -169,7 +169,7 @@ exports.activatestaff = async (req, res) => {
         if (active) {
             // Activate: set dateinactivated to null
             await db.sequelize.query(
-                `UPDATE tblstaff SET datelastactivated = NULL WHERE pkey = :pkey`,
+                `UPDATE tblstaff SET dateinactivated = NULL WHERE pkey = :pkey`,
                 {
                     replacements: { pkey },
                     type: db.sequelize.QueryTypes.UPDATE
@@ -178,7 +178,7 @@ exports.activatestaff = async (req, res) => {
         } else {
             // Deactivate: set dateinactivated to NOW()
             await db.sequelize.query(
-                `UPDATE tblstaff SET datelastactivated = NOW() WHERE pkey = :pkey`,
+                `UPDATE tblstaff SET dateinactivated = NOW() WHERE pkey = :pkey`,
                 {
                     replacements: { pkey },
                     type: db.sequelize.QueryTypes.UPDATE
