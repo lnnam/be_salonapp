@@ -1,0 +1,234 @@
+const db = require("../models");
+
+exports.addcustomer = async (req, res) => {
+    try {
+        const { fullname, phone, email, dob } = req.body;
+
+        // Validate required fields
+        if (!fullname || !phone || !email) {
+            return res.status(400).json({
+                error: "Missing required fields: fullname, phone, email"
+            });
+        }
+
+        // Insert customer into tblcustomer
+        const result = await db.sequelize.query(
+            `INSERT INTO tblcustomer (fullname, phone, email, birthday, dateactivated) 
+       VALUES (:fullname, :phone, :email, :birthday, NOW())`,
+            {
+                replacements: {
+                    fullname: String(fullname).trim(),
+                    phone: String(phone).trim(),
+                    email: String(email).trim().toLowerCase(),
+                    birthday: dob || null
+                },
+                type: db.sequelize.QueryTypes.INSERT
+            }
+        );
+
+        res.status(201).json({
+            message: "Customer added successfully",
+            pkey: result[0],
+            fullname,
+            phone,
+            email,
+            dob
+        });
+    } catch (err) {
+        console.error("Error adding customer:", err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+exports.listcustomer = async (req, res) => {
+    try {
+        const customers = await db.sequelize.query(
+            `SELECT pkey, fullname, phone, email, birthday, photobase64, location, username, dateinactivated as datelastactivated 
+       FROM tblcustomer 
+       WHERE 1
+       ORDER BY fullname ASC`,
+            {
+                type: db.sequelize.QueryTypes.SELECT
+            }
+        );
+
+        res.status(200).json(customers);
+    } catch (err) {
+        console.error("Error fetching customers:", err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+exports.getcustomer = async (req, res) => {
+    try {
+        const { pkey } = req.params;
+
+        const customer = await db.sequelize.query(
+            `SELECT * FROM tblcustomer WHERE pkey = :pkey `,
+            {
+                replacements: { pkey },
+                type: db.sequelize.QueryTypes.SELECT
+            }
+        );
+
+        if (customer.length === 0) {
+            return res.status(404).json({ error: "Customer not found" });
+        }
+
+        res.status(200).json(customer[0]);
+    } catch (err) {
+        console.error("Error fetching customer:", err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+exports.updatecustomer = async (req, res) => {
+    try {
+        const { pkey } = req.params;
+        const { fullname, phone, email, dob } = req.body;
+
+        // Check if customer exists
+        const existingCustomer = await db.sequelize.query(
+            `SELECT pkey FROM tblcustomer WHERE pkey = :pkey `,
+            {
+                replacements: { pkey },
+                type: db.sequelize.QueryTypes.SELECT
+            }
+        );
+
+        if (existingCustomer.length === 0) {
+            return res.status(404).json({ error: "Customer not found" });
+        }
+
+        // Build dynamic update query
+        const updates = [];
+        const replacements = { pkey };
+
+        if (fullname !== undefined) {
+            updates.push(`fullname = :fullname`);
+            replacements.fullname = String(fullname).trim();
+        }
+        if (phone !== undefined) {
+            updates.push(`phone = :phone`);
+            replacements.phone = String(phone).trim();
+        }
+        if (email !== undefined) {
+            updates.push(`email = :email`);
+            replacements.email = String(email).trim().toLowerCase();
+        }
+        if (dob !== undefined) {
+            updates.push(`birthday = :dob`);
+            replacements.dob = dob || null;
+        }
+
+        if (updates.length === 0) {
+            return res.status(400).json({ error: "No fields to update" });
+        }
+
+        const updateQuery = `UPDATE tblcustomer SET ${updates.join(", ")} WHERE pkey = :pkey`;
+
+        await db.sequelize.query(updateQuery, {
+            replacements,
+            type: db.sequelize.QueryTypes.UPDATE
+        });
+
+        res.status(200).json({
+            message: "Customer updated successfully",
+            pkey
+        });
+    } catch (err) {
+        console.error("Error updating customer:", err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+exports.activatecustomer = async (req, res) => {
+    try {
+        const { pkey } = req.params;
+        const { active } = req.body;
+
+        // Validate active parameter
+        if (typeof active !== 'boolean') {
+            return res.status(400).json({ error: "active field must be a boolean" });
+        }
+
+        // Check if customer exists
+        const existingCustomer = await db.sequelize.query(
+            `SELECT pkey FROM tblcustomer WHERE pkey = :pkey`,
+            {
+                replacements: { pkey },
+                type: db.sequelize.QueryTypes.SELECT
+            }
+        );
+
+        if (existingCustomer.length === 0) {
+            return res.status(404).json({ error: "Customer not found" });
+        }
+
+        // Update customer active status
+        if (active) {
+            // Activate: set dateinactivated to null
+            await db.sequelize.query(
+                `UPDATE tblcustomer SET dateinactivated = NULL WHERE pkey = :pkey`,
+                {
+                    replacements: { pkey },
+                    type: db.sequelize.QueryTypes.UPDATE
+                }
+            );
+        } else {
+            // Deactivate: set dateinactivated to NOW()
+            await db.sequelize.query(
+                `UPDATE tblcustomer SET dateinactivated = NOW() WHERE pkey = :pkey`,
+                {
+                    replacements: { pkey },
+                    type: db.sequelize.QueryTypes.UPDATE
+                }
+            );
+        }
+
+        res.status(200).json({
+            message: active ? "Customer activated successfully" : "Customer deactivated successfully",
+            pkey,
+            active
+        });
+    } catch (err) {
+        console.error("Error updating customer status:", err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+exports.deletecustomer = async (req, res) => {
+    try {
+        const { pkey } = req.params;
+
+        // Check if customer exists
+        const existingCustomer = await db.sequelize.query(
+            `SELECT pkey FROM tblcustomer WHERE pkey = :pkey`,
+            {
+                replacements: { pkey },
+                type: db.sequelize.QueryTypes.SELECT
+            }
+        );
+
+        if (existingCustomer.length === 0) {
+            return res.status(404).json({ error: "Customer not found" });
+        }
+
+        // Delete customer
+        await db.sequelize.query(
+            `DELETE FROM tblcustomer WHERE pkey = :pkey`,
+            {
+                replacements: { pkey },
+                type: db.sequelize.QueryTypes.DELETE
+            }
+        );
+
+        res.status(200).json({
+            message: "Customer deleted successfully",
+            pkey
+        });
+    } catch (err) {
+        console.error("Error deleting customer:", err);
+        res.status(500).json({ error: err.message });
+    }
+};
