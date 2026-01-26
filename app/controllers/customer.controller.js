@@ -232,3 +232,47 @@ exports.deletecustomer = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
+
+exports.setvip = async (req, res) => {
+    try {
+        const { pkey } = req.params;
+        const { isvip } = req.body;
+
+        // Validate isvip parameter
+        if (isvip === undefined) {
+            return res.status(400).json({ error: "isvip field is required" });
+        }
+
+        // Check if customer exists
+        const existingCustomer = await db.sequelize.query(
+            `SELECT pkey FROM tblcustomer WHERE pkey = :pkey`,
+            {
+                replacements: { pkey },
+                type: db.sequelize.QueryTypes.SELECT
+            }
+        );
+
+        if (existingCustomer.length === 0) {
+            return res.status(404).json({ error: "Customer not found" });
+        }
+
+        // Update customer type based on isvip parameter
+        const typeValue = isvip === 1 ? 1 : null;
+        await db.sequelize.query(
+            `UPDATE tblcustomer SET type = :type WHERE pkey = :pkey`,
+            {
+                replacements: { pkey, type: typeValue },
+                type: db.sequelize.QueryTypes.UPDATE
+            }
+        );
+
+        res.status(200).json({
+            message: isvip === 1 ? "Customer set as VIP successfully" : "Customer VIP status removed successfully",
+            pkey,
+            isvip
+        });
+    } catch (err) {
+        console.error("Error updating customer VIP status:", err);
+        res.status(500).json({ error: err.message });
+    }
+};

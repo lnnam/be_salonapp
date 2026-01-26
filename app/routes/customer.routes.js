@@ -27,4 +27,7 @@ module.exports = function (app) {
 
     // Delete customer
     app.delete("/api/customer/delete/:pkey", controller.deletecustomer);
+
+    // Set customer as VIP
+    app.post("/api/customer/setvip/:pkey", controller.setvip);
 };
