@@ -59,6 +59,41 @@ exports.listcustomer = async (req, res) => {
     }
 };
 
+exports.listcustomerupcomingbirthday = async (req, res) => {
+    try {
+        const customers = await db.sequelize.query(
+            `SELECT pkey, fullname, phone, email, birthday, photobase64, location, username, dateinactivated as datelastactivated 
+       FROM tblcustomer 
+       WHERE birthday IS NOT NULL
+       AND dateinactivated IS NULL
+       AND DATEDIFF(
+           STR_TO_DATE(
+               CONCAT(
+                   IF(
+                       DATE_FORMAT(CURDATE(), '%m-%d') <= DATE_FORMAT(birthday, '%m-%d'),
+                       YEAR(CURDATE()),
+                       YEAR(CURDATE()) + 1
+                   ),
+                   '-',
+                   DATE_FORMAT(birthday, '%m-%d')
+               ),
+               '%Y-%m-%d'
+           ),
+           CURDATE()
+       ) BETWEEN 0 AND 21
+       ORDER BY DATE_FORMAT(birthday, '%m-%d') ASC`,
+            {
+                type: db.sequelize.QueryTypes.SELECT
+            }
+        );
+
+        res.status(200).json(customers);
+    } catch (err) {
+        console.error("Error fetching customers with upcoming birthdays:", err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
 exports.getcustomer = async (req, res) => {
     try {
         const { pkey } = req.params;
@@ -233,6 +268,47 @@ exports.deletecustomer = async (req, res) => {
     }
 };
 
+exports.listbooking = async (req, res) => {
+    try {
+        const { pkey } = req.params;
+
+        // Check if customer exists
+        const existingCustomer = await db.sequelize.query(
+            `SELECT pkey FROM tblcustomer WHERE pkey = :pkey`,
+            {
+                replacements: { pkey },
+                type: db.sequelize.QueryTypes.SELECT
+            }
+        );
+
+        if (existingCustomer.length === 0) {
+            return res.status(404).json({ error: "Customer not found" });
+        }
+
+        // Get all bookings for this customer
+        const bookings = await db.sequelize.query(
+            `SELECT pkey, status, servicekey, staffkey, datetime, bookingstart, bookingend, 
+                    note, customername, staffname, servicename, dateactivated
+             FROM tblbooking 
+             WHERE customerkey = :pkey AND dateinactivated IS NULL
+             ORDER BY bookingstart DESC`,
+            {
+                replacements: { pkey },
+                type: db.sequelize.QueryTypes.SELECT
+            }
+        );
+
+        res.status(200).json({
+            message: "Bookings retrieved successfully",
+            pkey,
+            count: bookings.length,
+            bookings
+        });
+    } catch (err) {
+        console.error("Error fetching customer bookings:", err);
+        res.status(500).json({ error: err.message });
+    }
+};
 exports.setvip = async (req, res) => {
     try {
         const { pkey } = req.params;
