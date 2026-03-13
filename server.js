@@ -57,5 +57,6 @@ require('./app/routes/contact.routes')(app);
 require('./app/routes/common.routes')(app);
 require('./app/routes/staff.routes')(app);
 require('./app/routes/customer.routes')(app);
+require('./app/routes/pos.routes')(app);
 
 
