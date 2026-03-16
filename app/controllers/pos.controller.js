@@ -1,5 +1,38 @@
 const db = require("../models");
 
+function formatDateYmd(inputDate) {
+    const year = inputDate.getFullYear();
+    const month = String(inputDate.getMonth() + 1).padStart(2, "0");
+    const day = String(inputDate.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+}
+
+function parseYmdToDate(value) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        return null;
+    }
+
+    const parsed = new Date(`${value}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) {
+        return null;
+    }
+
+    return parsed;
+}
+
+function getWeekStartYmd(dateValue) {
+    const localDate = new Date(dateValue);
+    const day = localDate.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    localDate.setDate(localDate.getDate() + diff);
+    return formatDateYmd(localDate);
+}
+
+function toMoney(value) {
+    const numeric = Number(value) || 0;
+    return Number(numeric.toFixed(2));
+}
+
 function notImplemented(handlerName, req, res) {
     res.status(501).json({
         error: `${handlerName} is not implemented yet`
@@ -176,7 +209,122 @@ exports.createsale = async (req, res) => {
 };
 
 exports.listsales = async (req, res) => {
-    return notImplemented("listsales", req, res);
+    try {
+        const inputDate = req.query.date ? String(req.query.date).trim() : "";
+        const now = new Date();
+        const defaultDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
+            now.getDate()
+        ).padStart(2, "0")}`;
+        const reportDate = inputDate || defaultDate;
+
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)) {
+            return res.status(400).json({
+                error: "Invalid date format. Expected YYYY-MM-DD"
+            });
+        }
+
+        const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+        const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 20));
+        const offset = (page - 1) * limit;
+
+        const salesRows = await db.sequelize.query(
+            `SELECT
+                s.pkey,
+                COALESCE(s.total, 0) AS total,
+                COALESCE(NULLIF(TRIM(s.payment_method), ''), 'unknown') AS payment_method,
+                s.dateactivated
+             FROM tblpos_sale s
+             WHERE DATE(s.dateactivated) = :reportDate
+             ORDER BY s.dateactivated DESC, s.pkey DESC
+             LIMIT :limit OFFSET :offset`,
+            {
+                replacements: {
+                    reportDate,
+                    limit,
+                    offset
+                },
+                type: db.sequelize.QueryTypes.SELECT
+            }
+        );
+
+        const saleKeys = salesRows.map((row) => Number(row.pkey)).filter((key) => Number.isInteger(key) && key > 0);
+        const servicesBySaleKey = {};
+
+        if (saleKeys.length > 0) {
+            const saleKeyPlaceholders = saleKeys.map((_, idx) => `:salekey${idx}`);
+            const saleKeyReplacements = saleKeys.reduce((acc, key, idx) => {
+                acc[`salekey${idx}`] = key;
+                return acc;
+            }, {});
+
+            const serviceRows = await db.sequelize.query(
+                `SELECT
+                    sale_key,
+                    TRIM(COALESCE(servicename, '')) AS servicename,
+                    COALESCE(price, 0) AS price
+                 FROM tblpos_sale_service
+                 WHERE sale_key IN (${saleKeyPlaceholders.join(",")})
+                 ORDER BY sale_key DESC, pkey ASC`,
+                {
+                    replacements: saleKeyReplacements,
+                    type: db.sequelize.QueryTypes.SELECT
+                }
+            );
+
+            serviceRows.forEach((row) => {
+                const saleKey = Number(row.sale_key);
+                if (!servicesBySaleKey[saleKey]) {
+                    servicesBySaleKey[saleKey] = [];
+                }
+
+                servicesBySaleKey[saleKey].push({
+                    name: row.servicename || "Service",
+                    price: Number(Number(row.price || 0).toFixed(2))
+                });
+            });
+        }
+
+        const countRows = await db.sequelize.query(
+            `SELECT COUNT(*) AS total_count
+             FROM tblpos_sale s
+             WHERE DATE(s.dateactivated) = :reportDate`,
+            {
+                replacements: { reportDate },
+                type: db.sequelize.QueryTypes.SELECT
+            }
+        );
+
+        const totalCount = Number(countRows[0] && countRows[0].total_count) || 0;
+        const totalPages = totalCount > 0 ? Math.ceil(totalCount / limit) : 0;
+
+        const receipts = salesRows.map((row) => {
+            const saleKey = Number(row.pkey);
+            const services = servicesBySaleKey[saleKey] || [];
+
+            return {
+                pkey: saleKey,
+                receipt_no: `R-${row.pkey}`,
+                services,
+                payment_method: String(row.payment_method || "unknown").toUpperCase(),
+                total: Number(Number(row.total || 0).toFixed(2)),
+                dateactivated: row.dateactivated
+            };
+        });
+
+        return res.status(200).json({
+            date: reportDate,
+            pagination: {
+                page,
+                limit,
+                total: totalCount,
+                total_pages: totalPages
+            },
+            receipts
+        });
+    } catch (err) {
+        console.error("Error fetching receipt list:", err);
+        return res.status(500).json({ error: err.message });
+    }
 };
 
 exports.getsale = async (req, res) => {
@@ -199,6 +347,298 @@ exports.removesaleitem = async (req, res) => {
     return notImplemented("removesaleitem", req, res);
 };
 
-exports.dailysummary = async (req, res) => {
-    return notImplemented("dailysummary", req, res);
+exports.summaryreport = async (req, res) => {
+    try {
+        const fromInput = req.query.from || req.query.date_from || req.query.start_date;
+        const toInput = req.query.to || req.query.date_to || req.query.end_date;
+
+        const now = new Date();
+        const defaultDate = formatDateYmd(now);
+
+        const dateFrom = String(fromInput || defaultDate).trim();
+        const dateTo = String(toInput || defaultDate).trim();
+        const parsedFrom = parseYmdToDate(dateFrom);
+        const parsedTo = parseYmdToDate(dateTo);
+
+        if (!parsedFrom || !parsedTo) {
+            return res.status(400).json({
+                error: "Invalid date format. Expected YYYY-MM-DD"
+            });
+        }
+
+        if (parsedFrom > parsedTo) {
+            return res.status(400).json({
+                error: "Invalid date range. `from` must be before or equal to `to`"
+            });
+        }
+
+        const summaryRows = await db.sequelize.query(
+            `SELECT
+                COALESCE(SUM(total), 0) AS total_sales,
+                COUNT(*) AS receipts,
+                COALESCE(SUM(CASE WHEN LOWER(TRIM(COALESCE(payment_method, ''))) = 'cash' THEN total ELSE 0 END), 0) AS cash_total,
+                COALESCE(SUM(CASE WHEN LOWER(TRIM(COALESCE(payment_method, ''))) = 'card' THEN total ELSE 0 END), 0) AS card_total
+             FROM tblpos_sale
+             WHERE DATE(dateactivated) BETWEEN :dateFrom AND :dateTo`,
+            {
+                replacements: { dateFrom, dateTo },
+                type: db.sequelize.QueryTypes.SELECT
+            }
+        );
+
+        const topServiceRows = await db.sequelize.query(
+            `SELECT
+                TRIM(servicename) AS servicename,
+                COUNT(*) AS quantity,
+                COALESCE(SUM(price), 0) AS amount
+             FROM tblpos_sale_service
+                         WHERE DATE(dateactivated) BETWEEN :dateFrom AND :dateTo
+               AND TRIM(COALESCE(servicename, '')) <> ''
+             GROUP BY TRIM(servicename)
+             ORDER BY amount DESC, quantity DESC
+             LIMIT 5`,
+            {
+                replacements: { dateFrom, dateTo },
+                type: db.sequelize.QueryTypes.SELECT
+            }
+        );
+
+        const toNumber = (value) => Number(value) || 0;
+        const toMoney = (value) => Number(toNumber(value).toFixed(2));
+
+        const summary = summaryRows[0] || {};
+        const totalSales = toMoney(summary.total_sales);
+        const receipts = Math.max(0, Math.trunc(toNumber(summary.receipts)));
+        const cashTotal = toMoney(summary.cash_total);
+        const cardTotal = toMoney(summary.card_total);
+        const averageTicket = receipts > 0 ? toMoney(totalSales / receipts) : 0;
+
+        const mixBase = totalSales > 0 ? totalSales : 0;
+        const cashPct = mixBase > 0 ? Math.round((cashTotal / mixBase) * 100) : 0;
+        const cardPct = mixBase > 0 ? Math.round((cardTotal / mixBase) * 100) : 0;
+
+        const topServices = topServiceRows.map((row) => ({
+            name: row.servicename,
+            quantity: Math.max(0, Math.trunc(toNumber(row.quantity))),
+            amount: toMoney(row.amount)
+        }));
+
+        return res.status(200).json({
+            date_from: dateFrom,
+            date_to: dateTo,
+            total_sales: totalSales,
+            receipts,
+            cash_total: cashTotal,
+            card_total: cardTotal,
+            average_ticket: averageTicket,
+            payment_mix: [
+                { method: "cash", amount: cashTotal, percentage: cashPct },
+                { method: "card", amount: cardTotal, percentage: cardPct }
+            ],
+            top_services: topServices
+        });
+    } catch (err) {
+        console.error("Error fetching daily POS summary:", err);
+        return res.status(500).json({ error: err.message });
+    }
+};
+
+exports.dailyreport = async (req, res) => {
+    try {
+        const fromInput = req.query.from || req.query.date_from || req.query.start_date;
+        const toInput = req.query.to || req.query.date_to || req.query.end_date;
+
+        const now = new Date();
+        const defaultTo = formatDateYmd(now);
+        const defaultFromDate = new Date(now);
+        defaultFromDate.setDate(defaultFromDate.getDate() - 13);
+        const defaultFrom = formatDateYmd(defaultFromDate);
+
+        const dateFrom = String(fromInput || defaultFrom).trim();
+        const dateTo = String(toInput || defaultTo).trim();
+
+        const parsedFrom = parseYmdToDate(dateFrom);
+        const parsedTo = parseYmdToDate(dateTo);
+
+        if (!parsedFrom || !parsedTo) {
+            return res.status(400).json({
+                error: "Invalid date format. Expected YYYY-MM-DD"
+            });
+        }
+
+        if (parsedFrom > parsedTo) {
+            return res.status(400).json({
+                error: "Invalid date range. `from` must be before or equal to `to`"
+            });
+        }
+
+        const maxRangeInDays = 62;
+        const dayDiff = Math.floor((parsedTo.getTime() - parsedFrom.getTime()) / 86400000) + 1;
+        if (dayDiff > maxRangeInDays) {
+            return res.status(400).json({
+                error: `Date range is too large. Maximum ${maxRangeInDays} days allowed`
+            });
+        }
+
+        const salesRows = await db.sequelize.query(
+            `SELECT
+                s.pkey,
+                COALESCE(s.total, 0) AS total,
+                COALESCE(NULLIF(TRIM(s.payment_method), ''), 'unknown') AS payment_method,
+                s.dateactivated
+             FROM tblpos_sale s
+             WHERE DATE(s.dateactivated) BETWEEN :dateFrom AND :dateTo
+             ORDER BY s.dateactivated DESC, s.pkey DESC`,
+            {
+                replacements: { dateFrom, dateTo },
+                type: db.sequelize.QueryTypes.SELECT
+            }
+        );
+
+        const saleKeys = salesRows
+            .map((row) => Number(row.pkey))
+            .filter((key) => Number.isInteger(key) && key > 0);
+
+        const servicesBySaleKey = {};
+        if (saleKeys.length > 0) {
+            const saleKeyPlaceholders = saleKeys.map((_, idx) => `:salekey${idx}`);
+            const saleKeyReplacements = saleKeys.reduce((acc, key, idx) => {
+                acc[`salekey${idx}`] = key;
+                return acc;
+            }, {});
+
+            const serviceRows = await db.sequelize.query(
+                `SELECT
+                    sale_key,
+                    TRIM(COALESCE(servicename, '')) AS servicename,
+                    COALESCE(price, 0) AS price
+                 FROM tblpos_sale_service
+                 WHERE sale_key IN (${saleKeyPlaceholders.join(",")})
+                 ORDER BY sale_key DESC, pkey ASC`,
+                {
+                    replacements: saleKeyReplacements,
+                    type: db.sequelize.QueryTypes.SELECT
+                }
+            );
+
+            serviceRows.forEach((row) => {
+                const saleKey = Number(row.sale_key);
+                if (!servicesBySaleKey[saleKey]) {
+                    servicesBySaleKey[saleKey] = [];
+                }
+
+                servicesBySaleKey[saleKey].push({
+                    name: String(row.servicename || "").trim(),
+                    price: toMoney(row.price)
+                });
+            });
+        }
+
+        const reportRows = salesRows.map((row) => {
+            const saleKey = Number(row.pkey);
+            const label = `Receipt #${saleKey}`;
+
+            const paymentMethod = String(row.payment_method || "unknown").toLowerCase();
+            const itemDate = new Date(row.dateactivated);
+            const dayKey = formatDateYmd(itemDate);
+
+            return {
+                sale_key: saleKey,
+                label,
+                payment_method: paymentMethod,
+                amount: toMoney(row.total),
+                datetime: row.dateactivated,
+                day_key: dayKey,
+                week_key: getWeekStartYmd(itemDate)
+            };
+        });
+
+        let totalIncome = 0;
+        let cashTotal = 0;
+        let cardTotal = 0;
+
+        const weekMap = new Map();
+
+        reportRows.forEach((row) => {
+            totalIncome += row.amount;
+            if (row.payment_method === "cash") {
+                cashTotal += row.amount;
+            } else if (row.payment_method === "card") {
+                cardTotal += row.amount;
+            }
+
+            if (!weekMap.has(row.week_key)) {
+                weekMap.set(row.week_key, {
+                    week_start: row.week_key,
+                    total: 0,
+                    daysMap: new Map()
+                });
+            }
+
+            const weekEntry = weekMap.get(row.week_key);
+            weekEntry.total += row.amount;
+
+            if (!weekEntry.daysMap.has(row.day_key)) {
+                weekEntry.daysMap.set(row.day_key, {
+                    date: row.day_key,
+                    total: 0,
+                    receipts: []
+                });
+            }
+
+            const dayEntry = weekEntry.daysMap.get(row.day_key);
+            dayEntry.total += row.amount;
+            dayEntry.receipts.push({
+                sale_key: row.sale_key,
+                datetime: row.datetime,
+                label: row.label,
+                payment_method: row.payment_method,
+                amount: row.amount
+            });
+        });
+
+        const weeks = Array.from(weekMap.values())
+            .sort((a, b) => b.week_start.localeCompare(a.week_start))
+            .map((weekEntry) => {
+                const days = Array.from(weekEntry.daysMap.values())
+                    .sort((a, b) => b.date.localeCompare(a.date))
+                    .map((dayEntry) => ({
+                        date: dayEntry.date,
+                        total: toMoney(dayEntry.total),
+                        receipts: dayEntry.receipts
+                            .sort((a, b) => {
+                                const timeA = new Date(a.datetime).getTime();
+                                const timeB = new Date(b.datetime).getTime();
+                                return timeB - timeA;
+                            })
+                            .map((receipt) => ({
+                                sale_key: receipt.sale_key,
+                                datetime: receipt.datetime,
+                                label: receipt.label,
+                                payment_method: receipt.payment_method.toUpperCase(),
+                                amount: toMoney(receipt.amount)
+                            }))
+                    }));
+
+                return {
+                    week_start: weekEntry.week_start,
+                    total: toMoney(weekEntry.total),
+                    days
+                };
+            });
+
+        return res.status(200).json({
+            date_from: dateFrom,
+            date_to: dateTo,
+            totals: {
+                income: toMoney(totalIncome),
+                cash: toMoney(cashTotal),
+                card: toMoney(cardTotal)
+            },
+            weeks
+        });
+    } catch (err) {
+        console.error("Error fetching POS daily report:", err);
+        return res.status(500).json({ error: err.message });
+    }
 };

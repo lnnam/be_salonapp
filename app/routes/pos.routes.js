@@ -15,6 +15,7 @@ module.exports = function (app) {
     // Sales
     app.post("/api/pos/sale", controller.createsale);
     app.get("/api/pos/sale", controller.listsales);
+    app.get("/api/pos/receipt", controller.listsales);
     app.get("/api/pos/sale/:pkey", controller.getsale);
     app.put("/api/pos/sale/:pkey/complete", controller.completesale);
     app.put("/api/pos/sale/:pkey/void", controller.voidsale);
@@ -24,5 +25,6 @@ module.exports = function (app) {
     app.delete("/api/pos/sale/:salepkey/item/:itempkey", controller.removesaleitem);
 
     // Reports
-    app.get("/api/pos/summary/daily", controller.dailysummary);
+    app.get("/api/pos/summary/daily", controller.summaryreport);
+    app.get("/api/pos/report/daily", controller.dailyreport);
 };
