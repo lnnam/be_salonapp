@@ -1,3 +1,5 @@
+const crypto = require("crypto");
+
 const db = require("../models");
 
 function formatDateYmd(inputDate) {
@@ -31,6 +33,43 @@ function getWeekStartYmd(dateValue) {
 function toMoney(value) {
     const numeric = Number(value) || 0;
     return Number(numeric.toFixed(2));
+}
+
+function generateRandomSalePkey(length = 5) {
+    const characters = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const bytes = crypto.randomBytes(length);
+    let key = "";
+
+    for (let index = 0; index < length; index += 1) {
+        key += characters[bytes[index] % characters.length];
+    }
+
+    return key;
+}
+
+async function generateUniqueSalePkey(transaction) {
+    const maxAttempts = 10;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const pkey = generateRandomSalePkey();
+        const existingSale = await db.sequelize.query(
+            `SELECT pkey
+             FROM tblpos_sale
+             WHERE pkey = :pkey
+             LIMIT 1`,
+            {
+                replacements: { pkey },
+                type: db.sequelize.QueryTypes.SELECT,
+                transaction
+            }
+        );
+
+        if (!existingSale.length) {
+            return pkey;
+        }
+    }
+
+    throw new Error("Unable to generate unique sale key");
 }
 
 function notImplemented(handlerName, req, res) {
@@ -76,7 +115,7 @@ exports.createsale = async (req, res) => {
             servicekey,
             payment_method,
             customer_key,
-            order_key
+            dateactivated
         } = req.body;
 
         if (!Array.isArray(servicekey) || servicekey.length === 0) {
@@ -139,7 +178,6 @@ exports.createsale = async (req, res) => {
             customer_key === undefined || customer_key === null || customer_key === ""
                 ? null
                 : Number(customer_key);
-        const normalizedOrderKey = order_key ? String(order_key).trim() : null;
 
         if (
             normalizedCustomerKey !== null &&
@@ -148,24 +186,32 @@ exports.createsale = async (req, res) => {
             return res.status(400).json({ error: "customer_key must be a positive integer" });
         }
 
+        const finalDateActivated = dateactivated ? String(dateactivated).trim() : null;
+        if (!finalDateActivated) {
+            return res.status(400).json({ error: "dateactivated is required" });
+        }
+
         const transaction = await db.sequelize.transaction();
 
         try {
-            const saleResult = await db.sequelize.query(
+            const saleKey = await generateUniqueSalePkey(transaction);
+
+            await db.sequelize.query(
                 `INSERT INTO tblpos_sale
-                 (total, payment_method, dateactivated)
-                 VALUES (:total, :payment_method, NOW())`,
+                 (pkey, total, payment_method, customer_key, dateactivated)
+                 VALUES (:pkey, :total, :payment_method, :customer_key, :dateactivated)`,
                 {
                     replacements: {
+                        pkey: saleKey,
                         total,
                         payment_method: normalizedPaymentMethod,
+                        customer_key: normalizedCustomerKey,
+                        dateactivated: finalDateActivated,
                     },
                     type: db.sequelize.QueryTypes.INSERT,
                     transaction
                 }
             );
-
-            const saleKey = saleResult[0];
 
             for (let i = 0; i < saleItems.length; i += 1) {
                 const item = saleItems[i];
@@ -174,7 +220,7 @@ exports.createsale = async (req, res) => {
                     `INSERT INTO tblpos_sale_service
                      (sale_key, servicename, servicekey, price, payment_method, dateactivated)
                      VALUES
-                     (:sale_key, :servicename, :servicekey, :price, :payment_method, NOW())`,
+                     (:sale_key, :servicename, :servicekey, :price, :payment_method, :dateactivated)`,
                     {
                         replacements: {
                             sale_key: saleKey,
@@ -182,6 +228,7 @@ exports.createsale = async (req, res) => {
                             servicekey: item.servicekey,
                             price: item.price,
                             payment_method: normalizedPaymentMethod,
+                            dateactivated: finalDateActivated,
                         },
                         type: db.sequelize.QueryTypes.INSERT,
                         transaction
