@@ -22,7 +22,7 @@ module.exports = function (app) {
 
     // Sale items
     app.post("/api/pos/sale/:salepkey/item", controller.addsaleitem);
-    app.delete("/api/pos/sale/:salepkey/item/:itempkey", controller.removesaleitem);
+   // app.delete("/api/pos/sale/:salepkey/item/:itempkey", controller.removesaleitem);
 
     // Reports
     app.get("/api/pos/summary/daily", controller.summaryreport);

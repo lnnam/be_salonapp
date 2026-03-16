@@ -281,7 +281,8 @@ exports.listsales = async (req, res) => {
                 COALESCE(NULLIF(TRIM(s.payment_method), ''), 'unknown') AS payment_method,
                 s.dateactivated
              FROM tblpos_sale s
-             WHERE DATE(s.dateactivated) = :reportDate
+                         WHERE DATE(s.dateactivated) = :reportDate
+                             AND s.dateinactivated IS NULL
              ORDER BY s.dateactivated DESC, s.pkey DESC
              LIMIT :limit OFFSET :offset`,
             {
@@ -294,7 +295,9 @@ exports.listsales = async (req, res) => {
             }
         );
 
-        const saleKeys = salesRows.map((row) => Number(row.pkey)).filter((key) => Number.isInteger(key) && key > 0);
+        const saleKeys = salesRows
+            .map((row) => String(row.pkey || "").trim())
+            .filter(Boolean);
         const servicesBySaleKey = {};
 
         if (saleKeys.length > 0) {
@@ -319,7 +322,7 @@ exports.listsales = async (req, res) => {
             );
 
             serviceRows.forEach((row) => {
-                const saleKey = Number(row.sale_key);
+                const saleKey = String(row.sale_key || "").trim();
                 if (!servicesBySaleKey[saleKey]) {
                     servicesBySaleKey[saleKey] = [];
                 }
@@ -334,7 +337,8 @@ exports.listsales = async (req, res) => {
         const countRows = await db.sequelize.query(
             `SELECT COUNT(*) AS total_count
              FROM tblpos_sale s
-             WHERE DATE(s.dateactivated) = :reportDate`,
+             WHERE DATE(s.dateactivated) = :reportDate
+               AND s.dateinactivated IS NULL`,
             {
                 replacements: { reportDate },
                 type: db.sequelize.QueryTypes.SELECT
@@ -345,7 +349,7 @@ exports.listsales = async (req, res) => {
         const totalPages = totalCount > 0 ? Math.ceil(totalCount / limit) : 0;
 
         const receipts = salesRows.map((row) => {
-            const saleKey = Number(row.pkey);
+            const saleKey = String(row.pkey || "").trim();
             const services = servicesBySaleKey[saleKey] || [];
 
             return {
@@ -383,7 +387,59 @@ exports.completesale = async (req, res) => {
 };
 
 exports.voidsale = async (req, res) => {
-    return notImplemented("voidsale", req, res);
+    try {
+        const saleKey = String(req.params.pkey || "").trim();
+
+        if (!saleKey) {
+            return res.status(400).json({ error: "pkey is required" });
+        }
+
+        const transaction = await db.sequelize.transaction();
+
+        try {
+            await db.sequelize.query(
+                `DELETE FROM tblpos_sale_service
+                 WHERE sale_key = :sale_key`,
+                {
+                    replacements: { sale_key: saleKey },
+                    type: db.sequelize.QueryTypes.DELETE,
+                    transaction
+                }
+            );
+
+            const saleDeleteResult = await db.sequelize.query(
+                `DELETE FROM tblpos_sale
+                 WHERE pkey = :pkey`,
+                {
+                    replacements: { pkey: saleKey },
+                    type: db.sequelize.QueryTypes.DELETE,
+                    transaction
+                }
+            );
+
+            const affectedRows = Array.isArray(saleDeleteResult)
+                ? Number(saleDeleteResult[1] ?? saleDeleteResult[0]) || 0
+                : Number(saleDeleteResult) || 0;
+
+            if (affectedRows === 0) {
+                await transaction.rollback();
+                return res.status(404).json({ error: "Sale not found" });
+            }
+
+            await transaction.commit();
+        } catch (txError) {
+            await transaction.rollback();
+            throw txError;
+        }
+
+        return res.status(200).json({
+            message: "Sale deleted successfully",
+            pkey: saleKey
+        });
+    } catch (err) {
+        console.error("Error deleting sale:", err);
+        return res.status(500).json({ error: err.message });
+    }
 };
 
 exports.addsaleitem = async (req, res) => {
@@ -426,7 +482,8 @@ exports.summaryreport = async (req, res) => {
                 COALESCE(SUM(CASE WHEN LOWER(TRIM(COALESCE(payment_method, ''))) = 'cash' THEN total ELSE 0 END), 0) AS cash_total,
                 COALESCE(SUM(CASE WHEN LOWER(TRIM(COALESCE(payment_method, ''))) = 'card' THEN total ELSE 0 END), 0) AS card_total
              FROM tblpos_sale
-             WHERE DATE(dateactivated) BETWEEN :dateFrom AND :dateTo`,
+             WHERE DATE(dateactivated) BETWEEN :dateFrom AND :dateTo
+               AND dateinactivated IS NULL`,
             {
                 replacements: { dateFrom, dateTo },
                 type: db.sequelize.QueryTypes.SELECT
@@ -535,6 +592,7 @@ exports.dailyreport = async (req, res) => {
                 s.dateactivated
              FROM tblpos_sale s
              WHERE DATE(s.dateactivated) BETWEEN :dateFrom AND :dateTo
+               AND s.dateinactivated IS NULL
              ORDER BY s.dateactivated DESC, s.pkey DESC`,
             {
                 replacements: { dateFrom, dateTo },
