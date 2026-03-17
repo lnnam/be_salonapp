@@ -417,14 +417,12 @@ exports.voidsale = async (req, res) => {
                 }
             );
 
-            const affectedRows = Array.isArray(saleDeleteResult)
-                ? Number(saleDeleteResult[1] ?? saleDeleteResult[0]) || 0
-                : Number(saleDeleteResult) || 0;
+            const rawResult = Array.isArray(saleDeleteResult) ? saleDeleteResult[1] : saleDeleteResult;
+            const affectedRows = (rawResult && typeof rawResult === "object")
+                ? (rawResult.affectedRows ?? 0)
+                : (Number(rawResult) || 0);
 
-            if (affectedRows === 0) {
-                await transaction.rollback();
-                return res.status(404).json({ error: "Sale not found" });
-            }
+
 
             await transaction.commit();
         } catch (txError) {
@@ -601,8 +599,8 @@ exports.dailyreport = async (req, res) => {
         );
 
         const saleKeys = salesRows
-            .map((row) => Number(row.pkey))
-            .filter((key) => Number.isInteger(key) && key > 0);
+            .map((row) => String(row.pkey || "").trim())
+            .filter(Boolean);
 
         const servicesBySaleKey = {};
         if (saleKeys.length > 0) {
@@ -627,7 +625,7 @@ exports.dailyreport = async (req, res) => {
             );
 
             serviceRows.forEach((row) => {
-                const saleKey = Number(row.sale_key);
+                const saleKey = String(row.sale_key || "").trim();
                 if (!servicesBySaleKey[saleKey]) {
                     servicesBySaleKey[saleKey] = [];
                 }
@@ -640,7 +638,7 @@ exports.dailyreport = async (req, res) => {
         }
 
         const reportRows = salesRows.map((row) => {
-            const saleKey = Number(row.pkey);
+            const saleKey = String(row.pkey || "").trim();
             const label = `Receipt #${saleKey}`;
 
             const paymentMethod = String(row.payment_method || "unknown").toLowerCase();
