@@ -354,7 +354,7 @@ exports.listsales = async (req, res) => {
 
             return {
                 pkey: saleKey,
-                receipt_no: `R-${row.pkey}`,
+                receipt_no: `#${row.pkey}`,
                 services,
                 payment_method: String(row.payment_method || "unknown").toUpperCase(),
                 total: Number(Number(row.total || 0).toFixed(2)),
