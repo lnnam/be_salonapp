@@ -639,7 +639,7 @@ exports.dailyreport = async (req, res) => {
 
         const reportRows = salesRows.map((row) => {
             const saleKey = String(row.pkey || "").trim();
-            const label = `Receipt #${saleKey}`;
+            const label = `#${saleKey}`;
 
             const paymentMethod = String(row.payment_method || "unknown").toLowerCase();
             const itemDate = new Date(row.dateactivated);
