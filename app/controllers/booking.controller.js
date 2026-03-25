@@ -1387,7 +1387,8 @@ exports._bookingweb_save = async (req, res) => {
       customerphone,
       staffname,
       servicename,
-      userkey
+      userkey,
+      numbooking
     } = req.body;
 
     if (!servicekey || !staffkey || !datetime) {
@@ -1701,52 +1702,65 @@ exports._bookingweb_save = async (req, res) => {
       }
 
     } else {
-      // INSERT new booking
-      console.log('✨ Creating new booking with customerkey:', resolvedCustomerKey);
+      // INSERT new booking(s) - loop based on numbooking
+      console.log('✨ Creating new booking(s) with customerkey:', resolvedCustomerKey, 'numbooking:', numbooking);
 
-      const insertQuery = `
-        INSERT INTO tblbooking 
-        (customerkey, servicekey, staffkey, date, datetime, bookingstart, bookingend, 
-         customeremail, customerphone,
-         dateactivated, note, customername, staffname, servicename, userkey, createdby)
-        VALUES 
-        (:customerkey, :servicekey, :staffkey, DATE(:datetime), :datetime, :bookingstart, :bookingend, 
-         :customeremail, :customerphone,
-         NOW(), :note, :customername, :staffname, :servicename, :userkey, 'customer')
-      `;
+      // Validate numbooking is between 1 and 10
+      const numBookingsToCreate = Math.min(Math.max(Number(numbooking) || 1, 1), 10);
+      console.log('📊 Creating', numBookingsToCreate, 'booking(s)');
 
-      const objstore = await db.sequelize.query(insertQuery, {
-        replacements: {
-          customerkey: resolvedCustomerKey,
-          servicekey,
-          staffkey,
-          customeremail,
-          customerphone,
-          datetime: bookingStart,
-          bookingstart: bookingStart,
-          bookingend: bookingEndStr,
-          note,
-          customername,
-          staffname,
-          servicename,
-          userkey,
-        },
-        type: db.sequelize.QueryTypes.INSERT,
-      });
+      const createdBookingKeys = [];
 
-      newBookingKey = objstore[0];
+      // Loop to create multiple bookings
+      for (let i = 0; i < numBookingsToCreate; i++) {
+        const insertQuery = `
+          INSERT INTO tblbooking 
+          (customerkey, servicekey, staffkey, date, datetime, bookingstart, bookingend, 
+           customeremail, customerphone,
+           dateactivated, note, customername, staffname, servicename, userkey, createdby)
+          VALUES 
+          (:customerkey, :servicekey, :staffkey, DATE(:datetime), :datetime, :bookingstart, :bookingend, 
+           :customeremail, :customerphone,
+           NOW(), :note, :customername, :staffname, :servicename, :userkey, 'customer')
+        `;
+
+        const objstore = await db.sequelize.query(insertQuery, {
+          replacements: {
+            customerkey: resolvedCustomerKey,
+            servicekey,
+            staffkey,
+            customeremail,
+            customerphone,
+            datetime: bookingStart,
+            bookingstart: bookingStart,
+            bookingend: bookingEndStr,
+            note,
+            customername,
+            staffname,
+            servicename,
+            userkey,
+          },
+          type: db.sequelize.QueryTypes.INSERT,
+        });
+
+        const bookingKey = objstore[0];
+        createdBookingKeys.push(bookingKey);
+        console.log(`✅ Booking ${i + 1}/${numBookingsToCreate} created with pkey:`, bookingKey);
+      }
+
+      newBookingKey = createdBookingKeys[0];
       isNewBooking = true;
 
-      // ✅ Increment numbooking for customer
+      // ✅ Increment numbooking for customer (by numBookingsToCreate)
       await db.sequelize.query(
-        "UPDATE tblcustomer SET numbooking = numbooking + 1 WHERE pkey = :customerkey",
+        "UPDATE tblcustomer SET numbooking = numbooking + :count WHERE pkey = :customerkey",
         {
-          replacements: { customerkey: resolvedCustomerKey },
+          replacements: { customerkey: resolvedCustomerKey, count: numBookingsToCreate },
           type: db.sequelize.QueryTypes.UPDATE
         }
       );
 
-      console.log('✅ Incremented numbooking for customer:', resolvedCustomerKey);
+      console.log('✅ Incremented numbooking for customer:', resolvedCustomerKey, 'by', numBookingsToCreate);
 
       // ✅ Fetch customer info from tblcustomer for email notifications
       const customerInfo = await db.sequelize.query(
@@ -2878,7 +2892,8 @@ exports._update_app_setting = async (req, res) => {
       autoconfirm,
       aicheck,
       listoffday,
-      listhouroff
+      listhouroff,
+      booking_lead_time
     } = req.body;
 
     // Validate pkey is provided
@@ -2889,7 +2904,7 @@ exports._update_app_setting = async (req, res) => {
       });
     }
 
-    // Build update fields - only these 6 fields are allowed
+    // Build update fields from allowed settings payload
     const updateFields = {};
     if (num_staff_for_autobooking !== undefined) updateFields.num_staff_for_autobooking = num_staff_for_autobooking;
     if (onoff !== undefined) updateFields.onoff = onoff;
@@ -2900,6 +2915,7 @@ exports._update_app_setting = async (req, res) => {
     updateFields.ai_check = aiValue === 'no' ? 'no' : 'yes';
     if (listoffday !== undefined) updateFields.listoffday = listoffday;
     if (listhouroff !== undefined) updateFields.listhouroff = listhouroff;
+    if (booking_lead_time !== undefined) updateFields.booking_lead_time = booking_lead_time;
 
     // If no fields to update, return error
     if (Object.keys(updateFields).length === 0) {
