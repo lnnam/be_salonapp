@@ -1010,7 +1010,7 @@ exports._getavailability_owner = async (req, res) => {
 
 exports._getavailability = async (req, res) => {
   try {
-    const { date, staffkey } = req.query;
+    const { date, staffkey, servicekey } = req.query;
 
     // ✅ Default values
     const p_date = date || new Date().toISOString().split("T")[0];
@@ -1022,13 +1022,16 @@ exports._getavailability = async (req, res) => {
     }
 
     // ✅ Execute stored procedure
+    const availabilityQuery = "CALL getAvailability_v4(:date, :staffkey, :servicekey)";
+    console.log("Executing query:", availabilityQuery);
+    console.log("With replacements:", { date: p_date, staffkey: p_staffkey, servicekey: servicekey || null });
     const result = await db.sequelize.query(
-      "CALL getAvailability_v3(:date, :staffkey)",
+      availabilityQuery,
       {
         replacements: {
           date: p_date,
           staffkey: p_staffkey,
-
+          servicekey: servicekey || null,
         },
       }
     );
