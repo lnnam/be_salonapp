@@ -28,6 +28,44 @@ function formatDatetimeForDisplay(mysqlDatetime) {
   }
 }
 
+function formatDateToMySQLLocal(dateObj) {
+  const year = dateObj.getFullYear();
+  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const day = String(dateObj.getDate()).padStart(2, '0');
+  const hours = String(dateObj.getHours()).padStart(2, '0');
+  const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+  const seconds = String(dateObj.getSeconds()).padStart(2, '0');
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
+function parseServiceDurationToMinutes(rawDuration) {
+  if (rawDuration === null || typeof rawDuration === "undefined") return 45;
+
+  if (typeof rawDuration === "number" && Number.isFinite(rawDuration)) {
+    return rawDuration > 0 ? Math.round(rawDuration) : 45;
+  }
+
+  const normalized = String(rawDuration).trim();
+
+  // Numeric string, e.g. "90"
+  if (/^\d+(\.\d+)?$/.test(normalized)) {
+    const numericMinutes = Number(normalized);
+    return numericMinutes > 0 ? Math.round(numericMinutes) : 45;
+  }
+
+  // Time string, e.g. "01:30" or "01:30:00"
+  const timeParts = normalized.match(/^(\d{1,3}):([0-5]\d)(?::([0-5]\d))?$/);
+  if (timeParts) {
+    const hours = Number(timeParts[1]);
+    const minutes = Number(timeParts[2]);
+    const seconds = Number(timeParts[3] || 0);
+    const totalMinutes = hours * 60 + minutes + (seconds >= 30 ? 1 : 0);
+    return totalMinutes > 0 ? totalMinutes : 45;
+  }
+
+  return 45;
+}
+
 
 exports._booking_list = async (req, res) => {
   try {
@@ -249,9 +287,25 @@ exports._booking_save = async (req, res) => {
     }
 
     const bookingStart = formatToMySQLDatetime(datetime);
+
+    // Fetch service duration from tblservice (fallback to 45 min)
+    let serviceDuration = 45;
+    try {
+      const serviceRows = await db.sequelize.query(
+        "SELECT duration FROM tblservice WHERE pkey = :servicekey LIMIT 1",
+        { replacements: { servicekey }, type: db.sequelize.QueryTypes.SELECT }
+      );
+      if (Array.isArray(serviceRows) && serviceRows.length > 0) {
+        serviceDuration = parseServiceDurationToMinutes(serviceRows[0].duration);
+      }
+    } catch (e) {
+      console.warn('⚠️ Could not fetch service duration, using default 45 min:', e && e.message);
+    }
+    console.log(`⏱️ Service duration for servicekey=${servicekey}: ${serviceDuration} min`);
+
     const bookingEnd = new Date(bookingStart);
-    bookingEnd.setMinutes(bookingEnd.getMinutes() + 45);
-    const bookingEndStr = bookingEnd.toISOString().slice(0, 19).replace("T", " ");
+    bookingEnd.setMinutes(bookingEnd.getMinutes() + serviceDuration);
+    const bookingEndStr = formatDateToMySQLLocal(bookingEnd);
     // Track whether the booking time changed during an update
     let timeChanged = false;
 
@@ -1496,9 +1550,38 @@ exports._bookingweb_save = async (req, res) => {
     }
 
     const bookingStart = formatToMySQLDatetime(datetime);
+
+    // Fetch service duration from tblservice (fallback to 45 min)
+    let serviceDuration = 45;
+    try {
+      let serviceRows = await db.sequelize.query(
+        "SELECT duration FROM tblservice WHERE pkey = :servicekey LIMIT 1",
+        { replacements: { servicekey }, type: db.sequelize.QueryTypes.SELECT }
+      );
+
+      // Some schemas use servicekey column in tblservice instead of pkey.
+      if (!Array.isArray(serviceRows) || serviceRows.length === 0) {
+        try {
+          serviceRows = await db.sequelize.query(
+            "SELECT duration FROM tblservice WHERE servicekey = :servicekey LIMIT 1",
+            { replacements: { servicekey }, type: db.sequelize.QueryTypes.SELECT }
+          );
+        } catch (_err) {
+          // Ignore fallback lookup errors and keep default duration.
+        }
+      }
+
+      if (Array.isArray(serviceRows) && serviceRows.length > 0) {
+        serviceDuration = parseServiceDurationToMinutes(serviceRows[0].duration);
+      }
+    } catch (e) {
+      console.warn('⚠️ Could not fetch service duration, using default 45 min:', e && e.message);
+    }
+    console.log(`⏱️ Service duration for servicekey=${servicekey}: ${serviceDuration} min`);
+    console.log('serviceDuration raw value:', serviceDuration);
     const bookingEnd = new Date(bookingStart);
-    bookingEnd.setMinutes(bookingEnd.getMinutes() + 45);
-    const bookingEndStr = bookingEnd.toISOString().slice(0, 19).replace("T", " ");
+    bookingEnd.setMinutes(bookingEnd.getMinutes() + serviceDuration);
+    const bookingEndStr = formatDateToMySQLLocal(bookingEnd);
 
     let newBookingKey = isUpdating ? Number(bookingkey) : null;
     let isNewBooking = false;
