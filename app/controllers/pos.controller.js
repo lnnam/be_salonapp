@@ -574,7 +574,7 @@ exports.dailyreport = async (req, res) => {
             });
         }
 
-        const maxRangeInDays = 62;
+        const maxRangeInDays = 100;
         const dayDiff = Math.floor((parsedTo.getTime() - parsedFrom.getTime()) / 86400000) + 1;
         if (dayDiff > maxRangeInDays) {
             return res.status(400).json({
